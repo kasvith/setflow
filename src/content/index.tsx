@@ -8,6 +8,7 @@ let popover: HTMLElement | null = null
 interface TrackInfo {
   trackStart: number // minutes from journey start
   trackEnd: number
+  trackDuration: number // track duration in minutes
   phase: Phase | null
   nextPhase: Phase | null
   minutesUntilNextPhase: number | null
@@ -25,6 +26,43 @@ function formatDuration(minutes: number): string {
   if (h > 0 && m > 0) return `${h}h ${m}m`
   if (h > 0) return `${h}h`
   return `${m}m`
+}
+
+function formatTimeWithSeconds(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit'
+  })
+}
+
+function formatDurationShort(minutes: number): string {
+  if (minutes < 0) {
+    // Past event
+    const absMin = Math.abs(minutes)
+    if (absMin < 1) {
+      const seconds = Math.round(absMin * 60)
+      return `${seconds}s ago`
+    }
+    return `${Math.floor(absMin)}m ago`
+  }
+  if (minutes < 1) {
+    const seconds = Math.round(minutes * 60)
+    return `${seconds}s`
+  }
+  const m = Math.floor(minutes)
+  const s = Math.round((minutes - m) * 60)
+  if (s > 0) return `${m}m ${s}s`
+  return `${m}m`
+}
+
+function formatTrackPosition(currentSeconds: number, totalSeconds: number): string {
+  const formatSec = (sec: number) => {
+    const m = Math.floor(sec / 60)
+    const s = Math.floor(sec % 60)
+    return `${m}:${s.toString().padStart(2, '0')}`
+  }
+  return `${formatSec(currentSeconds)} / ${formatSec(totalSeconds)}`
 }
 
 function getPhaseTimeRange(session: Session, phase: Phase): { start: string; end: string } {
@@ -66,18 +104,31 @@ function createPopover(): HTMLElement {
   return el
 }
 
-function showPopover(target: HTMLElement, info: TrackInfo) {
+function showPopover(target: HTMLElement, info: TrackInfo, mouseY: number) {
   if (!popover) popover = createPopover()
   if (!session) return
 
-  const elapsedMinutes = (Date.now() - session.startTime) / (1000 * 60)
-  const trackTime = formatTime(session.startTime + info.trackStart * 60 * 1000)
-  const minutesUntilTrack = info.trackStart - elapsedMinutes
+  // Calculate position ratio based on mouseY within target
+  const rect = target.getBoundingClientRect()
+  const ratio = Math.max(0, Math.min(1, (mouseY - rect.top) / rect.height))
+
+  // Calculate simulated time based on mouse position
+  const simulatedMinutes = info.trackStart + (info.trackDuration * ratio)
+  const simulatedTimestamp = session.startTime + simulatedMinutes * 60 * 1000
+
+  // Calculate track position in seconds
+  const trackPositionSeconds = ratio * info.trackDuration * 60
+  const trackTotalSeconds = info.trackDuration * 60
 
   let html = `<div class="popover-content">`
 
-  // Track time header
-  html += `<div class="popover-time">${trackTime}</div>`
+  // Simulated time header (changes with mouse position)
+  const dayDiff = Math.floor((simulatedTimestamp - session.startTime) / (24 * 60 * 60 * 1000))
+  let timeDisplay = formatTimeWithSeconds(simulatedTimestamp)
+  if (dayDiff > 0) {
+    timeDisplay += ` <span class="day-indicator">+${dayDiff}d</span>`
+  }
+  html += `<div class="popover-time">${timeDisplay}</div>`
 
   // Current phase
   if (info.phase) {
@@ -91,43 +142,37 @@ function showPopover(target: HTMLElement, info: TrackInfo) {
     `
   }
 
-  // Track status
-  if (minutesUntilTrack > 0) {
-    html += `<div class="popover-status">Plays in ${formatDuration(minutesUntilTrack)}</div>`
-  } else if (minutesUntilTrack > -10) {
-    html += `<div class="popover-status playing">Now playing</div>`
-  }
+  // Track position
+  html += `<div class="popover-track-position">${formatTrackPosition(trackPositionSeconds, trackTotalSeconds)}</div>`
 
-  // Next phase
-  if (info.phase && info.nextPhase && info.minutesUntilNextPhase !== null && info.minutesUntilNextPhase > 0) {
-    html += `
-      <div class="popover-upcoming">
-        <span class="upcoming-label">Next:</span>
-        <span class="phase-dot" style="background: ${info.nextPhase.color}"></span>
-        <span>${info.nextPhase.name} in ${formatDuration(info.minutesUntilNextPhase)}</span>
-      </div>
-    `
-  }
-
-  // Celestial events
-  if (info.sunriseMinutes !== null) {
-    const minutesUntilSunrise = info.sunriseMinutes - elapsedMinutes
-    if (minutesUntilSunrise > 0 && info.trackStart <= info.sunriseMinutes && info.trackEnd > info.sunriseMinutes) {
-      html += `<div class="popover-celestial sunrise">☀️ Sunrise in ${formatDuration(minutesUntilSunrise)}</div>`
+  // Celestial events relative to simulated time
+  if (info.sunriseMinutes !== null && info.trackStart <= info.sunriseMinutes && info.trackEnd > info.sunriseMinutes) {
+    const minutesToSunrise = info.sunriseMinutes - simulatedMinutes
+    if (Math.abs(minutesToSunrise) < 0.05) {
+      // At sunrise moment (within ~3 seconds)
+      html += `<div class="popover-celestial sunrise active">☀️ Sunrise!</div>`
+    } else if (minutesToSunrise > 0) {
+      html += `<div class="popover-celestial sunrise">☀️ Sunrise in ${formatDurationShort(minutesToSunrise)}</div>`
+    } else {
+      html += `<div class="popover-celestial sunrise past">☀️ Sunrise was ${formatDurationShort(minutesToSunrise)}</div>`
     }
   }
-  if (info.sunsetMinutes !== null) {
-    const minutesUntilSunset = info.sunsetMinutes - elapsedMinutes
-    if (minutesUntilSunset > 0 && info.trackStart <= info.sunsetMinutes && info.trackEnd > info.sunsetMinutes) {
-      html += `<div class="popover-celestial sunset">🌙 Sunset in ${formatDuration(minutesUntilSunset)}</div>`
+  if (info.sunsetMinutes !== null && info.trackStart <= info.sunsetMinutes && info.trackEnd > info.sunsetMinutes) {
+    const minutesToSunset = info.sunsetMinutes - simulatedMinutes
+    if (Math.abs(minutesToSunset) < 0.05) {
+      // At sunset moment (within ~3 seconds)
+      html += `<div class="popover-celestial sunset active">🌙 Sunset!</div>`
+    } else if (minutesToSunset > 0) {
+      html += `<div class="popover-celestial sunset">🌙 Sunset in ${formatDurationShort(minutesToSunset)}</div>`
+    } else {
+      html += `<div class="popover-celestial sunset past">🌙 Sunset was ${formatDurationShort(minutesToSunset)}</div>`
     }
   }
 
   html += `</div>`
   popover.innerHTML = html
 
-  // Position popover
-  const rect = target.getBoundingClientRect()
+  // Position popover near mouse but stable
   popover.style.display = 'block'
   popover.style.left = `${rect.left + 20}px`
   popover.style.top = `${rect.top - popover.offsetHeight - 8}px`
@@ -206,10 +251,11 @@ function removeLabels() {
   document.querySelectorAll('.setflow-phase-header').forEach((el) => el.remove())
   document.querySelectorAll('.setflow-popover').forEach((el) => el.remove())
   popover = null
-  document.querySelectorAll('[data-setflow-phase]').forEach((el) => {
+  document.querySelectorAll('[data-setflow-phase], .setflow-beyond-phase').forEach((el) => {
     const htmlEl = el as HTMLElement
     htmlEl.removeAttribute('data-setflow-phase')
     htmlEl.removeAttribute('data-setflow-info')
+    htmlEl.classList.remove('setflow-beyond-phase')
     htmlEl.style.borderLeft = ''
     htmlEl.style.background = ''
   })
@@ -243,11 +289,11 @@ function labelTracks() {
     ? (session.sunsetTimestamp - session.startTime) / (1000 * 60)
     : null
 
-  // Find all track items in playlists
-  const trackItems = document.querySelectorAll(`
-    ytmusic-responsive-list-item-renderer,
-    ytmusic-player-queue-item
-  `)
+  // Find track items only in the playlist shelf
+  const container = document.querySelector('#contents > ytmusic-playlist-shelf-renderer')
+  if (!container) return
+
+  const trackItems = container.querySelectorAll('ytmusic-responsive-list-item-renderer')
 
   if (trackItems.length === 0) return
 
@@ -297,6 +343,7 @@ function labelTracks() {
     const trackInfo: TrackInfo = {
       trackStart,
       trackEnd,
+      trackDuration,
       phase,
       nextPhase: nextPhaseInfo?.phase || null,
       minutesUntilNextPhase: nextPhaseInfo?.startsIn || null,
@@ -307,11 +354,9 @@ function labelTracks() {
     // Add popover event listeners (only once)
     if (!htmlItem.hasAttribute('data-setflow-bound')) {
       htmlItem.setAttribute('data-setflow-bound', 'true')
-      htmlItem.addEventListener('mouseenter', () => {
+      htmlItem.addEventListener('mousemove', (e) => {
         const info = JSON.parse(htmlItem.getAttribute('data-setflow-info') || '{}')
-        if (info.phase) {
-          showPopover(htmlItem, info)
-        }
+        showPopover(htmlItem, info, e.clientY)
       })
       htmlItem.addEventListener('mouseleave', hidePopover)
     }
@@ -324,11 +369,13 @@ function labelTracks() {
       htmlItem.style.borderLeft = `4px solid ${phase.color}`
       htmlItem.style.background = `linear-gradient(90deg, ${phase.color}15 0%, transparent 30%)`
       htmlItem.setAttribute('data-setflow-phase', phase.name)
+      htmlItem.classList.remove('setflow-beyond-phase')
     } else {
-      // Track is past the journey - no phase indicator
+      // No phase - show striped border indicator only
       htmlItem.style.borderLeft = ''
       htmlItem.style.background = ''
       htmlItem.removeAttribute('data-setflow-phase')
+      htmlItem.classList.add('setflow-beyond-phase')
     }
 
     // Remove old absolute-positioned indicators if they exist
@@ -467,6 +514,26 @@ style.textContent = `
     transition: background 0.3s ease, border-left 0.3s ease;
   }
 
+  .setflow-beyond-phase {
+    position: relative;
+  }
+
+  .setflow-beyond-phase::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: repeating-linear-gradient(
+      -45deg,
+      #555,
+      #555 2px,
+      #333 2px,
+      #333 4px
+    );
+  }
+
   .setflow-celestial-label {
     display: inline-flex;
     align-items: center;
@@ -539,6 +606,13 @@ style.textContent = `
     color: #fff;
     margin-bottom: 8px;
     letter-spacing: -0.5px;
+  }
+
+  .day-indicator {
+    font-size: 12px;
+    color: #888;
+    font-weight: 400;
+    margin-left: 4px;
   }
 
   .popover-phase {
@@ -614,6 +688,38 @@ style.textContent = `
   .popover-celestial.sunset {
     background: linear-gradient(135deg, rgba(92, 107, 192, 0.2), rgba(57, 73, 171, 0.1));
     color: #7986CB;
+  }
+
+  .popover-celestial.active {
+    animation: celestial-pulse 0.5s ease-in-out infinite;
+    font-weight: 700;
+  }
+
+  .popover-celestial.sunrise.active {
+    background: linear-gradient(135deg, rgba(255, 213, 79, 0.4), rgba(255, 152, 0, 0.3));
+    box-shadow: 0 0 12px rgba(255, 152, 0, 0.4);
+  }
+
+  .popover-celestial.sunset.active {
+    background: linear-gradient(135deg, rgba(92, 107, 192, 0.4), rgba(57, 73, 171, 0.3));
+    box-shadow: 0 0 12px rgba(92, 107, 192, 0.4);
+  }
+
+  .popover-celestial.past {
+    opacity: 0.6;
+  }
+
+  @keyframes celestial-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.02); }
+  }
+
+  .popover-track-position {
+    font-size: 13px;
+    font-weight: 500;
+    color: #9C27B0;
+    margin-bottom: 8px;
+    font-variant-numeric: tabular-nums;
   }
 `
 document.head.appendChild(style)

@@ -6,12 +6,16 @@ interface Props {
   currentPhases: Phase[]
   onLoad: (preset: Preset) => void
   onSave: (name: string) => void
+  onDelete: (name: string) => void
+  onRestoreDefaults: () => void
 }
 
 export default function PresetManager({
   presets,
   onLoad,
   onSave,
+  onDelete,
+  onRestoreDefaults,
 }: Props) {
   const [newName, setNewName] = useState('')
 
@@ -19,6 +23,11 @@ export default function PresetManager({
     if (!newName.trim()) return
     onSave(newName.trim())
     setNewName('')
+  }
+
+  function handleDelete(e: React.MouseEvent, name: string) {
+    e.stopPropagation()
+    onDelete(name)
   }
 
   return (
@@ -40,7 +49,12 @@ export default function PresetManager({
       </div>
 
       <div className="section">
-        <div className="section-title">Saved Presets</div>
+        <div className="section-header">
+          <span className="section-title">Saved Presets</span>
+          <button className="clear-btn" onClick={onRestoreDefaults}>
+            Restore Defaults
+          </button>
+        </div>
         <div className="preset-list">
           {presets.length === 0 && (
             <div style={{ color: '#666', fontSize: 14, padding: 12 }}>
@@ -64,6 +78,13 @@ export default function PresetManager({
                   />
                 ))}
               </div>
+              <button
+                className="phase-delete"
+                onClick={(e) => handleDelete(e, preset.name)}
+                title="Delete preset"
+              >
+                ×
+              </button>
             </div>
           ))}
         </div>

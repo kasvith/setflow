@@ -95,13 +95,27 @@ body {
   cursor: pointer;
 }
 
-.phase-name {
+.phase-info {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.phase-name {
   background: transparent;
   border: none;
   color: #fff;
   font-size: 14px;
   outline: none;
+  width: 100%;
+}
+
+.phase-time-range {
+  font-size: 11px;
+  color: #888;
+  font-variant-numeric: tabular-nums;
 }
 
 .phase-duration {
@@ -405,10 +419,32 @@ body {
   margin-bottom: 10px;
 }
 
+.section-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .total-duration {
   font-size: 12px;
   color: #9C27B0;
   font-weight: 500;
+}
+
+.clear-btn {
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #888;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.clear-btn:hover {
+  border-color: #E91E63;
+  color: #E91E63;
 }
 
 /* Hint Text */

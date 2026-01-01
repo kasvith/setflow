@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
-import { Phase, Session, Preset, DEFAULT_PHASES } from '../shared/types'
+import { Phase, Session, Preset, DEFAULT_PHASES, DEFAULT_PRESETS } from '../shared/types'
 import {
   getActiveSession,
   setActiveSession,
   getPresets,
   savePreset,
+  deletePreset,
+  setStorageData,
 } from '../shared/storage'
 import { generateId, timeInputToTimestamp, formatDurationCompact } from '../shared/utils'
 import PhaseEditor from './components/PhaseEditor'
@@ -94,8 +96,27 @@ export default function App() {
   }
 
   function handleDeletePhase(id: string) {
-    if (phases.length <= 1) return
     setPhases(phases.filter((p) => p.id !== id))
+  }
+
+  function handleClearPhases() {
+    setPhases([])
+    setDurationPreset('custom')
+  }
+
+  function handleDurationPreset(preset: DurationPreset) {
+    setDurationPreset(preset)
+    if (preset === '12h') {
+      const preset12h = DEFAULT_PRESETS.find(p => p.name === 'Standard 12hr')
+      if (preset12h) {
+        setPhases(preset12h.phases.map(p => ({ ...p, id: generateId() })))
+      }
+    } else if (preset === '8h') {
+      const preset8h = DEFAULT_PRESETS.find(p => p.name === 'Short 8hr')
+      if (preset8h) {
+        setPhases(preset8h.phases.map(p => ({ ...p, id: generateId() })))
+      }
+    }
   }
 
   function handleReorderPhases(newPhases: Phase[]) {
@@ -111,6 +132,16 @@ export default function App() {
   function handleLoadPreset(preset: Preset) {
     setPhases(preset.phases.map((p) => ({ ...p, id: generateId() })))
     setTab('session')
+  }
+
+  async function handleDeletePreset(name: string) {
+    await deletePreset(name)
+    setPresets(await getPresets())
+  }
+
+  async function handleRestoreDefaults() {
+    await setStorageData({ presets: DEFAULT_PRESETS })
+    setPresets(DEFAULT_PRESETS)
   }
 
   const totalDuration = phases.reduce((sum, p) => sum + p.duration, 0)
@@ -167,8 +198,16 @@ export default function App() {
             </div>
           )}
 
-          {activeSession && phaseTimeRanges.length > 0 && (
+          {activeSession && (
             <div className="phase-schedule">
+              <div className="phase-schedule-item">
+                <span className="phase-schedule-dot" style={{ background: '#666' }}></span>
+                <span className="phase-schedule-name">Started</span>
+                <span className="phase-schedule-time">
+                  {formatTime(new Date(activeSession.startTime))}
+                </span>
+              </div>
+
               {phaseTimeRanges.map(({ phase, startTime, endTime }) => (
                 <div key={phase.id} className="phase-schedule-item">
                   <span
@@ -181,6 +220,21 @@ export default function App() {
                   </span>
                 </div>
               ))}
+
+              {activeSession.sunriseTime && (
+                <div className="phase-schedule-item">
+                  <span className="phase-schedule-dot" style={{ background: '#FFB74D' }}></span>
+                  <span className="phase-schedule-name">Sunrise</span>
+                  <span className="phase-schedule-time">{activeSession.sunriseTime}</span>
+                </div>
+              )}
+              {activeSession.sunsetTime && (
+                <div className="phase-schedule-item">
+                  <span className="phase-schedule-dot" style={{ background: '#5C6BC0' }}></span>
+                  <span className="phase-schedule-name">Sunset</span>
+                  <span className="phase-schedule-time">{activeSession.sunsetTime}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -203,19 +257,19 @@ export default function App() {
                     <div className="duration-preset-selector">
                       <button
                         className={`preset-btn ${durationPreset === '8h' ? 'active' : ''}`}
-                        onClick={() => setDurationPreset('8h')}
+                        onClick={() => handleDurationPreset('8h')}
                       >
                         8h
                       </button>
                       <button
                         className={`preset-btn ${durationPreset === '12h' ? 'active' : ''}`}
-                        onClick={() => setDurationPreset('12h')}
+                        onClick={() => handleDurationPreset('12h')}
                       >
                         12h
                       </button>
                       <button
                         className={`preset-btn ${durationPreset === 'custom' ? 'active' : ''}`}
-                        onClick={() => setDurationPreset('custom')}
+                        onClick={() => handleDurationPreset('custom')}
                       >
                         Custom
                       </button>
@@ -254,13 +308,23 @@ export default function App() {
           <div className="section">
             <div className="section-header">
               <span className="section-title">Phases</span>
-              <span className="total-duration">
-                {formatDurationCompact(totalDuration)} total
-              </span>
+              <div className="section-header-right">
+                {phases.length > 0 && !activeSession && (
+                  <button className="clear-btn" onClick={handleClearPhases}>
+                    Clear
+                  </button>
+                )}
+                {phases.length > 0 && (
+                  <span className="total-duration">
+                    {formatDurationCompact(totalDuration)}
+                  </span>
+                )}
+              </div>
             </div>
             <PhaseEditor
               phases={phases}
               disabled={!!activeSession}
+              startTime={startTime}
               onAdd={handleAddPhase}
               onUpdate={handleUpdatePhase}
               onDelete={handleDeletePhase}
@@ -293,6 +357,8 @@ export default function App() {
           currentPhases={phases}
           onLoad={handleLoadPreset}
           onSave={handleSavePreset}
+          onDelete={handleDeletePreset}
+          onRestoreDefaults={handleRestoreDefaults}
         />
       )}
     </div>
