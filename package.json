@@ -1,0 +1,32 @@
+{
+  "name": "setflow",
+  "version": "1.0.0",
+  "description": "YouTube Music trip phase tracker",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build --mode production",
+    "preview": "vite preview"
+  },
+  "keywords": [
+    "chrome-extension",
+    "youtube-music"
+  ],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.17.0",
+  "dependencies": {
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "latest",
+    "@types/chrome": "^0.1.32",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "sharp": "^0.34.5",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0"
+  }
+}

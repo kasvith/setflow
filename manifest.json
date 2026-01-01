@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Setflow",
+  "description": "Track your journey phases on YouTube Music",
+  "version": "1.0.0",
+  "permissions": ["storage"],
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_title": "Setflow",
+    "default_icon": {
+      "16": "icon16.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://music.youtube.com/*"],
+      "js": ["src/content/index.tsx"],
+      "css": ["content.css"]
+    }
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.ts",
+    "type": "module"
+  }
+}
