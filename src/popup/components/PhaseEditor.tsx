@@ -46,6 +46,7 @@ export default function PhaseEditor({
   onDelete,
 }: Props) {
   const [colorPickerId, setColorPickerId] = useState<string | null>(null)
+  const [editingDuration, setEditingDuration] = useState<{ id: string; value: string } | null>(null)
 
   // Calculate phase time ranges (uses current time if no start time set)
   const baseMinutes = getBaseTimeMinutes(startTime)
@@ -105,13 +106,25 @@ export default function PhaseEditor({
             <input
               type="text"
               className="phase-duration"
-              value={formatDurationCompact(phase.duration)}
+              value={editingDuration?.id === phase.id ? editingDuration.value : formatDurationCompact(phase.duration)}
               disabled={disabled}
               placeholder="1h30m"
+              onFocus={() => setEditingDuration({ id: phase.id, value: formatDurationCompact(phase.duration) })}
               onChange={(e) => {
-                const parsed = parseDuration(e.target.value)
-                if (parsed !== null) {
-                  onUpdate(phase.id, { duration: parsed })
+                setEditingDuration({ id: phase.id, value: e.target.value })
+              }}
+              onBlur={() => {
+                if (editingDuration) {
+                  const parsed = parseDuration(editingDuration.value)
+                  if (parsed !== null && parsed > 0) {
+                    onUpdate(phase.id, { duration: parsed })
+                  }
+                  setEditingDuration(null)
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  (e.target as HTMLInputElement).blur()
                 }
               }}
             />
