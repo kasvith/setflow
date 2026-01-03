@@ -39,6 +39,7 @@ export default function App() {
   const [phases, setPhases] = useState<Phase[]>(DEFAULT_PHASES)
   const [activeSession, setActiveSessionState] = useState<Session | null>(null)
   const [presets, setPresets] = useState<Preset[]>([])
+  const [isOnYouTubeMusic, setIsOnYouTubeMusic] = useState<boolean | null>(null)
 
   // Journey settings state
   const [startTime, setStartTime] = useState<string>('')
@@ -89,8 +90,18 @@ export default function App() {
       setActiveSessionState(session)
       setPresets(loadedPresets)
 
-      // Try to get playlist URL from content script
+      // Check if we're on YouTube Music
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+      const currentUrl = tabs[0]?.url || ''
+      const onYTMusic = currentUrl.startsWith('https://music.youtube.com/')
+      setIsOnYouTubeMusic(onYTMusic)
+
+      if (!onYTMusic) {
+        isInitialLoad.current = false
+        return
+      }
+
+      // Try to get playlist URL from content script
       if (tabs[0]?.id) {
         const response = await sendMessageToContentScript<{ url: string | null }>(
           tabs[0].id,
@@ -352,6 +363,19 @@ export default function App() {
       }
     })
   }, [activeSession, phases])
+
+  if (isOnYouTubeMusic === false) {
+    return (
+      <div className="app">
+        <header className="header">
+          <h1>Setflow</h1>
+        </header>
+        <div className="disabled-state">
+          <p>Open a YouTube Music playlist to use Setflow</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="app">

@@ -647,3 +647,15 @@ body {
   color: #FFB74D;
   text-align: center;
 }
+
+/* Disabled state when not on YouTube Music */
+.disabled-state {
+  padding: 32px 16px;
+  text-align: center;
+  color: #888;
+}
+
+.disabled-state p {
+  font-size: 14px;
+  line-height: 1.6;
+}
