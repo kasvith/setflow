@@ -4,6 +4,13 @@ import { getPhaseAtTime } from '../shared/utils'
 
 let session: Session | null = null
 let popover: HTMLElement | null = null
+let labelIntervalId: number | null = null
+let debounceTimeout: number | null = null
+
+// Check if extension context is still valid (not invalidated by reload)
+function isExtensionContextValid(): boolean {
+  return typeof chrome !== 'undefined' && !!chrome.runtime?.id
+}
 
 // Get current playlist URL
 function getCurrentPlaylistUrl(): string | null {
@@ -17,11 +24,13 @@ function getCurrentPlaylistUrl(): string | null {
 
 // Notify popup of URL change
 function notifyUrlChange() {
+  if (!isExtensionContextValid()) return
+
   chrome.runtime.sendMessage({
     type: 'URL_CHANGED',
     url: getCurrentPlaylistUrl()
   }).catch(() => {
-    // Popup might not be open, ignore error
+    // Popup might not be open or context invalidated, ignore error
   })
 }
 
@@ -31,17 +40,29 @@ function setupUrlChangeListener() {
   window.addEventListener('popstate', notifyUrlChange)
 
   // Intercept pushState and replaceState for programmatic navigation
-  const originalPushState = history.pushState.bind(history)
-  const originalReplaceState = history.replaceState.bind(history)
+  // Guard against duplicate wrapping if script re-runs
+  type WrappedHistoryFn = History['pushState'] & { __setflow_wrapped?: boolean }
+  const pushStateFn = history.pushState as WrappedHistoryFn
+  const replaceStateFn = history.replaceState as WrappedHistoryFn
 
-  history.pushState = function (...args) {
-    originalPushState(...args)
-    notifyUrlChange()
+  if (!pushStateFn.__setflow_wrapped) {
+    const originalPushState = history.pushState.bind(history)
+    const wrappedPushState: WrappedHistoryFn = (...args: Parameters<typeof history.pushState>) => {
+      originalPushState(...args)
+      notifyUrlChange()
+    }
+    wrappedPushState.__setflow_wrapped = true
+    history.pushState = wrappedPushState
   }
 
-  history.replaceState = function (...args) {
-    originalReplaceState(...args)
-    notifyUrlChange()
+  if (!replaceStateFn.__setflow_wrapped) {
+    const originalReplaceState = history.replaceState.bind(history)
+    const wrappedReplaceState: WrappedHistoryFn = (...args: Parameters<typeof history.replaceState>) => {
+      originalReplaceState(...args)
+      notifyUrlChange()
+    }
+    wrappedReplaceState.__setflow_wrapped = true
+    history.replaceState = wrappedReplaceState
   }
 }
 
@@ -135,19 +156,40 @@ function extractTrackData(): ExportedTrack[] {
 }
 
 // Message handler for popup communication
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.type === 'GET_PLAYLIST_URL') {
-    sendResponse({ url: getCurrentPlaylistUrl() })
-    return true
-  }
-  if (message.type === 'EXPORT_TRACKLIST') {
-    const tracks = extractTrackData()
-    const playlistTitle = (document.querySelector('h2.title, ytmusic-detail-header-renderer yt-formatted-string.title') as HTMLElement | null)?.textContent?.trim() || 'Unknown Playlist'
-    sendResponse({ tracks, playlistTitle })
-    return true
-  }
-  return false
-})
+if (isExtensionContextValid()) {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (!isExtensionContextValid()) return false
+
+    if (message.type === 'GET_PLAYLIST_URL') {
+      sendResponse({ url: getCurrentPlaylistUrl() })
+      return true
+    }
+    if (message.type === 'EXPORT_TRACKLIST') {
+      const tracks = extractTrackData()
+      const playlistTitle = (document.querySelector('h2.title, ytmusic-detail-header-renderer yt-formatted-string.title') as HTMLElement | null)?.textContent?.trim() || 'Unknown Playlist'
+      sendResponse({ tracks, playlistTitle })
+      return true
+    }
+    if (message.type === 'SESSION_STARTED') {
+      // Direct notification from popup - update session and label tracks
+      session = message.session
+      if (session) {
+        labelTracks()
+        startObserver()
+      }
+      sendResponse({ success: true })
+      return true
+    }
+    if (message.type === 'SESSION_ENDED') {
+      session = null
+      removeLabels()
+      stopObserver()
+      sendResponse({ success: true })
+      return true
+    }
+    return false
+  })
+}
 
 interface TrackInfo {
   trackStart: number // minutes from journey start
@@ -338,45 +380,79 @@ function hidePopover() {
 }
 let observer: MutationObserver | null = null
 
-async function init() {
-  session = await getActiveSession()
-
-  if (session) {
-    labelTracks()
-    startObserver()
+// Cleanup function to prevent memory leaks
+function cleanup() {
+  if (labelIntervalId) {
+    clearInterval(labelIntervalId)
+    labelIntervalId = null
   }
+  if (debounceTimeout) {
+    clearTimeout(debounceTimeout)
+    debounceTimeout = null
+  }
+  stopObserver()
+  removeLabels()
+}
 
-  onStorageChange((data) => {
-    session = data.activeSession
+// Listen for page unload to cleanup
+window.addEventListener('beforeunload', cleanup)
+
+async function init() {
+  if (!isExtensionContextValid()) return
+
+  try {
+    session = await getActiveSession()
+
     if (session) {
       labelTracks()
       startObserver()
-    } else {
-      removeLabels()
-      stopObserver()
     }
-  })
 
-  // Re-label periodically to update time-based positions
-  setInterval(() => {
-    if (session) {
-      labelTracks()
-    }
-  }, 10000) // Every 10 seconds
+    onStorageChange((data) => {
+      if (!isExtensionContextValid()) return
+      session = data.activeSession
+      if (session) {
+        labelTracks()
+        startObserver()
+      } else {
+        removeLabels()
+        stopObserver()
+      }
+    })
+
+    // Re-label periodically to update time-based positions
+    // Store interval ID for cleanup
+    if (labelIntervalId) clearInterval(labelIntervalId)
+    labelIntervalId = setInterval(() => {
+      if (session && isExtensionContextValid()) {
+        labelTracks()
+      }
+    }, 10000) // Every 10 seconds
+  } catch {
+    // Extension context may have been invalidated
+  }
 }
 
 function startObserver() {
   if (observer) return
 
+  // Only observe the playlist container, not entire document.body
+  const container = document.querySelector('#contents > ytmusic-playlist-shelf-renderer')
+  if (!container) {
+    // Retry after delay if container not found yet
+    setTimeout(startObserver, 1000)
+    return
+  }
+
   observer = new MutationObserver(() => {
     if (session) {
-      // Debounce the labeling
-      setTimeout(labelTracks, 100)
+      // Proper debounce - clear previous timeout
+      if (debounceTimeout) clearTimeout(debounceTimeout)
+      debounceTimeout = setTimeout(labelTracks, 100)
     }
   })
 
-  // Observe the main content area for changes
-  observer.observe(document.body, {
+  observer.observe(container, {
     childList: true,
     subtree: true,
   })
@@ -390,19 +466,26 @@ function stopObserver() {
 }
 
 function removeLabels() {
-  document.querySelectorAll('.setflow-phase-indicator').forEach((el) => el.remove())
-  document.querySelectorAll('.setflow-celestial-label').forEach((el) => el.remove())
-  document.querySelectorAll('.setflow-phase-header').forEach((el) => el.remove())
-  document.querySelectorAll('.setflow-popover').forEach((el) => el.remove())
-  popover = null
-  document.querySelectorAll('[data-setflow-phase], .setflow-beyond-phase').forEach((el) => {
-    const htmlEl = el as HTMLElement
-    htmlEl.removeAttribute('data-setflow-phase')
-    htmlEl.removeAttribute('data-setflow-info')
-    htmlEl.classList.remove('setflow-beyond-phase')
-    htmlEl.style.borderLeft = ''
-    htmlEl.style.background = ''
+  // Single consolidated query for all setflow elements
+  document.querySelectorAll(
+    '.setflow-phase-indicator, .setflow-celestial-label, .setflow-phase-header, .setflow-popover, [data-setflow-phase], .setflow-beyond-phase'
+  ).forEach((el) => {
+    if (el.classList.contains('setflow-phase-indicator') ||
+        el.classList.contains('setflow-celestial-label') ||
+        el.classList.contains('setflow-phase-header') ||
+        el.classList.contains('setflow-popover')) {
+      el.remove()
+    } else {
+      const htmlEl = el as HTMLElement
+      htmlEl.removeAttribute('data-setflow-phase')
+      htmlEl.removeAttribute('data-setflow-info')
+      htmlEl.removeAttribute('data-setflow-bound')
+      htmlEl.classList.remove('setflow-beyond-phase')
+      htmlEl.style.borderLeft = ''
+      htmlEl.style.background = ''
+    }
   })
+  popover = null
 }
 
 function parseDurationToMinutes(duration: string): number {
@@ -647,7 +730,10 @@ function getPhaseStartTime(session: Session, phaseName: string): number {
 }
 
 // Add CSS for phase indicators and celestial labels
+// Guard against duplicate injection if script re-runs
+if (!document.getElementById('setflow-styles')) {
 const style = document.createElement('style')
+style.id = 'setflow-styles'
 style.textContent = `
   @keyframes pulse {
     0%, 100% { opacity: 1; }
@@ -867,6 +953,7 @@ style.textContent = `
   }
 `
 document.head.appendChild(style)
+}
 
 // Initialize
 if (document.readyState === 'loading') {

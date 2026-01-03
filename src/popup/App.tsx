@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Phase, Session, Preset, DEFAULT_PHASES, DEFAULT_PRESETS, ExportedTracklist } from '../shared/types'
 import {
   getActiveSession,
@@ -35,21 +35,8 @@ export default function App() {
   const [currentPlaylistUrl, setCurrentPlaylistUrl] = useState<string | null>(null)
   const isInitialLoad = useRef(true)
 
-  useEffect(() => {
-    loadData()
-
-    // Listen for URL changes from content script
-    const handleMessage = (message: { type: string; url: string | null }) => {
-      if (message.type === 'URL_CHANGED') {
-        handlePlaylistUrlChange(message.url)
-      }
-    }
-    chrome.runtime.onMessage.addListener(handleMessage)
-    return () => chrome.runtime.onMessage.removeListener(handleMessage)
-  }, [])
-
   // Handle playlist URL changes
-  async function handlePlaylistUrlChange(newUrl: string | null) {
+  const handlePlaylistUrlChange = useCallback(async (newUrl: string | null) => {
     if (newUrl === currentPlaylistUrl) return
     setCurrentPlaylistUrl(newUrl)
 
@@ -75,7 +62,76 @@ export default function App() {
     setStartTime('')
     setSunriseTime('')
     setSunsetTime('')
-  }
+  }, [currentPlaylistUrl, activeSession])
+
+  useEffect(() => {
+    // Load initial data from storage
+    async function loadData() {
+      const [session, loadedPresets, draft] = await Promise.all([
+        getActiveSession(),
+        getPresets(),
+        getDraftFormState(),
+      ])
+      setActiveSessionState(session)
+      setPresets(loadedPresets)
+
+      // Try to get playlist URL from content script
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+        if (tabs[0]?.id) {
+          chrome.tabs.sendMessage(tabs[0].id, { type: 'GET_PLAYLIST_URL' }, async (response) => {
+            if (chrome.runtime.lastError) {
+              // Content script not available
+              return
+            }
+            if (response?.url) {
+              setCurrentPlaylistUrl(response.url)
+              // Check for saved journey
+              const savedJourney = await getSavedJourney(response.url)
+              if (savedJourney && !session) {
+                setJourneyName(savedJourney.name)
+                setPhases(savedJourney.phases.map(p => ({ ...p, id: generateId() })))
+                if (savedJourney.startTime) setStartTime(savedJourney.startTime)
+                if (savedJourney.sunriseTime) setSunriseTime(savedJourney.sunriseTime)
+                if (savedJourney.sunsetTime) setSunsetTime(savedJourney.sunsetTime)
+                if (savedJourney.durationPreset) setDurationPreset(savedJourney.durationPreset as DurationPreset)
+                isInitialLoad.current = false
+                return
+              }
+            }
+          })
+        }
+      } catch {
+        // Ignore errors
+      }
+
+      if (session) {
+        setPhases(session.phases)
+        if (session.journeyName) setJourneyName(session.journeyName)
+      } else if (draft) {
+        // Restore draft state if no active session
+        setStartTime(draft.startTime || '')
+        setSunriseTime(draft.sunriseTime || '')
+        setSunsetTime(draft.sunsetTime || '')
+        setDurationPreset((draft.durationPreset as DurationPreset) || '12h')
+        setPhases(draft.phases?.length > 0 ? draft.phases : DEFAULT_PHASES)
+        setJourneyName(draft.journeyName || '')
+      }
+
+      isInitialLoad.current = false
+    }
+
+    loadData()
+
+    // Listen for URL changes from content script
+    const handleMessage = (message: { type: string; url: string | null }) => {
+      if (message.type === 'URL_CHANGED') {
+        handlePlaylistUrlChange(message.url)
+      }
+    }
+    chrome.runtime.onMessage.addListener(handleMessage)
+    return () => chrome.runtime.onMessage.removeListener(handleMessage)
+  }, [handlePlaylistUrlChange])
 
   // Auto-save draft on form changes (debounced)
   useEffect(() => {
@@ -96,61 +152,6 @@ export default function App() {
 
     return () => clearTimeout(timeoutId)
   }, [startTime, sunriseTime, sunsetTime, durationPreset, phases, journeyName, activeSession])
-
-  async function loadData() {
-    const [session, loadedPresets, draft] = await Promise.all([
-      getActiveSession(),
-      getPresets(),
-      getDraftFormState(),
-    ])
-    setActiveSessionState(session)
-    setPresets(loadedPresets)
-
-    // Try to get playlist URL from content script
-    try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'GET_PLAYLIST_URL' }, async (response) => {
-          if (chrome.runtime.lastError) {
-            // Content script not available
-            return
-          }
-          if (response?.url) {
-            setCurrentPlaylistUrl(response.url)
-            // Check for saved journey
-            const savedJourney = await getSavedJourney(response.url)
-            if (savedJourney && !session) {
-              setJourneyName(savedJourney.name)
-              setPhases(savedJourney.phases.map(p => ({ ...p, id: generateId() })))
-              if (savedJourney.startTime) setStartTime(savedJourney.startTime)
-              if (savedJourney.sunriseTime) setSunriseTime(savedJourney.sunriseTime)
-              if (savedJourney.sunsetTime) setSunsetTime(savedJourney.sunsetTime)
-              if (savedJourney.durationPreset) setDurationPreset(savedJourney.durationPreset as DurationPreset)
-              isInitialLoad.current = false
-              return
-            }
-          }
-        })
-      }
-    } catch {
-      // Ignore errors
-    }
-
-    if (session) {
-      setPhases(session.phases)
-      if (session.journeyName) setJourneyName(session.journeyName)
-    } else if (draft) {
-      // Restore draft state if no active session
-      setStartTime(draft.startTime || '')
-      setSunriseTime(draft.sunriseTime || '')
-      setSunsetTime(draft.sunsetTime || '')
-      setDurationPreset((draft.durationPreset as DurationPreset) || '12h')
-      setPhases(draft.phases?.length > 0 ? draft.phases : DEFAULT_PHASES)
-      setJourneyName(draft.journeyName || '')
-    }
-
-    isInitialLoad.current = false
-  }
 
   async function handleStartPlanning() {
     // Calculate start timestamp from time input or use now
@@ -189,6 +190,16 @@ export default function App() {
     await setActiveSession(session)
     setActiveSessionState(session)
 
+    // Notify content script directly (fallback for storage listener)
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (tabs[0]?.id) {
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'SESSION_STARTED', session })
+      }
+    } catch {
+      // Content script may not be available
+    }
+
     // Save journey if we have a playlist URL and name
     if (currentPlaylistUrl && journeyName) {
       await saveJourney({
@@ -208,6 +219,16 @@ export default function App() {
   async function handleEndSession() {
     await setActiveSession(null)
     setActiveSessionState(null)
+
+    // Notify content script directly
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (tabs[0]?.id) {
+        chrome.tabs.sendMessage(tabs[0].id, { type: 'SESSION_ENDED' })
+      }
+    } catch {
+      // Content script may not be available
+    }
   }
 
   function handleAddPhase() {
@@ -308,7 +329,7 @@ export default function App() {
         document.body.removeChild(a)
         URL.revokeObjectURL(url)
       })
-    } catch (err) {
+    } catch {
       alert('Failed to export tracklist')
     }
   }
@@ -317,23 +338,21 @@ export default function App() {
     return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   }
 
-  function getPhaseTimeRanges() {
+  const phaseTimeRanges = useMemo(() => {
     if (!activeSession) return []
-    const startTime = activeSession.startTime
+    const sessionStartTime = activeSession.startTime
     let accumulatedMinutes = 0
     return phases.map((phase) => {
-      const phaseStart = new Date(startTime + accumulatedMinutes * 60 * 1000)
+      const phaseStart = new Date(sessionStartTime + accumulatedMinutes * 60 * 1000)
       accumulatedMinutes += phase.duration
-      const phaseEnd = new Date(startTime + accumulatedMinutes * 60 * 1000)
+      const phaseEnd = new Date(sessionStartTime + accumulatedMinutes * 60 * 1000)
       return {
         phase,
-        startTime: formatTime(phaseStart),
-        endTime: formatTime(phaseEnd),
+        startTime: phaseStart.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+        endTime: phaseEnd.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
       }
     })
-  }
-
-  const phaseTimeRanges = getPhaseTimeRanges()
+  }, [activeSession, phases])
 
   return (
     <div className="app">
@@ -365,9 +384,9 @@ export default function App() {
             </div>
           )}
 
-          {activeSession && activeSession.playlistUrl && currentPlaylistUrl && activeSession.playlistUrl !== currentPlaylistUrl && (
+          {activeSession?.playlistUrl && currentPlaylistUrl && activeSession.playlistUrl !== currentPlaylistUrl && (
             <div className="url-mismatch-warning">
-              You've navigated away from the session's playlist
+              You&apos;ve navigated away from the session&apos;s playlist
             </div>
           )}
 
