@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.0.4] - 2025-01-03
+
+### Features
+
+- **popup:** Show disabled state when not on YouTube Music instead of full UI
+
+### Bug Fixes
+
+- **popup:** Handle connection errors when content script is unavailable
+
+### Performance
+
+- **content:** Fix memory leak - clear setInterval on cleanup
+- **content:** Prevent duplicate History API wrapping on script re-run
+- **content:** Prevent duplicate style injection
+- **content:** Optimize MutationObserver to only watch playlist container instead of entire body
+- **content:** Fix debounce timeout leak in MutationObserver callback
+- **content:** Consolidate DOM cleanup queries into single selector
+- **popup:** Add useMemo for phase time range calculations
+
 ## [0.0.3] - 2025-01-03
 
 ### Features
