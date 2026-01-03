@@ -1,9 +1,153 @@
 import { getActiveSession, onStorageChange } from '../shared/storage'
-import { Session, Phase } from '../shared/types'
+import { Session, Phase, ExportedTrack } from '../shared/types'
 import { getPhaseAtTime } from '../shared/utils'
 
 let session: Session | null = null
 let popover: HTMLElement | null = null
+
+// Get current playlist URL
+function getCurrentPlaylistUrl(): string | null {
+  const url = new URL(window.location.href)
+  const listId = url.searchParams.get('list')
+  if (listId) {
+    return `https://music.youtube.com/playlist?list=${listId}`
+  }
+  return null
+}
+
+// Notify popup of URL change
+function notifyUrlChange() {
+  chrome.runtime.sendMessage({
+    type: 'URL_CHANGED',
+    url: getCurrentPlaylistUrl()
+  }).catch(() => {
+    // Popup might not be open, ignore error
+  })
+}
+
+// Monitor URL changes using History API (YouTube Music is a SPA)
+function setupUrlChangeListener() {
+  // Listen for back/forward navigation
+  window.addEventListener('popstate', notifyUrlChange)
+
+  // Intercept pushState and replaceState for programmatic navigation
+  const originalPushState = history.pushState.bind(history)
+  const originalReplaceState = history.replaceState.bind(history)
+
+  history.pushState = function (...args) {
+    originalPushState(...args)
+    notifyUrlChange()
+  }
+
+  history.replaceState = function (...args) {
+    originalReplaceState(...args)
+    notifyUrlChange()
+  }
+}
+
+setupUrlChangeListener()
+
+// Format time from session start minutes
+function formatTimeFromMinutes(session: Session | null, minutes: number): string {
+  if (!session) return ''
+  const timestamp = session.startTime + minutes * 60 * 1000
+  return new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+// Extract track data for export
+function extractTrackData(): ExportedTrack[] {
+  if (!session) return []
+
+  // Try multiple selectors for different YouTube Music page layouts
+  let trackItems = document.querySelectorAll('#contents > ytmusic-playlist-shelf-renderer ytmusic-responsive-list-item-renderer')
+
+  if (trackItems.length === 0) {
+    // Try alternative selector for playlist detail pages
+    trackItems = document.querySelectorAll('ytmusic-playlist-shelf-renderer ytmusic-responsive-list-item-renderer')
+  }
+
+  if (trackItems.length === 0) {
+    // Try selector for general list items
+    trackItems = document.querySelectorAll('ytmusic-responsive-list-item-renderer')
+  }
+
+  if (trackItems.length === 0) return []
+  const tracks: ExportedTrack[] = []
+  let accumulatedMinutes = 0
+
+  trackItems.forEach((item, index) => {
+    // Extract title
+    const titleEl = item.querySelector('yt-formatted-string.title') as HTMLElement | null
+    const name = titleEl?.textContent?.trim() || 'Unknown Track'
+
+    // Extract artist(s)
+    const artistEl = item.querySelector('.secondary-flex-columns yt-formatted-string') as HTMLElement | null
+    const artist = artistEl?.textContent?.trim() || 'Unknown Artist'
+
+    // Extract duration
+    let durationText = ''
+    const durationEl = item.querySelector('.fixed-columns > yt-formatted-string')
+    if (durationEl) {
+      durationText = durationEl.textContent?.trim() || ''
+    }
+    if (!durationText || !durationText.match(/^\d{1,2}:\d{2}(:\d{2})?$/)) {
+      const allFormattedStrings = item.querySelectorAll('yt-formatted-string')
+      for (const el of allFormattedStrings) {
+        const text = el.textContent?.trim() || ''
+        if (text.match(/^\d{1,2}:\d{2}(:\d{2})?$/)) {
+          durationText = text
+          break
+        }
+      }
+    }
+    if (!durationText) durationText = '4:00'
+
+    const durationMinutes = parseDurationToMinutes(durationText)
+
+    // Extract YouTube URL
+    const linkEl = item.querySelector('a[href*="watch"]') as HTMLAnchorElement | null
+    const youtubeUrl = linkEl?.href || null
+
+    // Calculate phase
+    const phase = getPhaseAtTime(session!, accumulatedMinutes)
+
+    const trackStart = accumulatedMinutes
+    const trackEnd = accumulatedMinutes + durationMinutes
+
+    tracks.push({
+      index: index + 1,
+      name,
+      artist,
+      duration: durationText,
+      durationMinutes,
+      journeyStartTime: formatTimeFromMinutes(session, trackStart),
+      journeyEndTime: formatTimeFromMinutes(session, trackEnd),
+      journeyStartMinutes: trackStart,
+      journeyEndMinutes: trackEnd,
+      phase: phase ? { name: phase.name, color: phase.color } : null,
+      youtubeUrl,
+    })
+
+    accumulatedMinutes += durationMinutes
+  })
+
+  return tracks
+}
+
+// Message handler for popup communication
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === 'GET_PLAYLIST_URL') {
+    sendResponse({ url: getCurrentPlaylistUrl() })
+    return true
+  }
+  if (message.type === 'EXPORT_TRACKLIST') {
+    const tracks = extractTrackData()
+    const playlistTitle = (document.querySelector('h2.title, ytmusic-detail-header-renderer yt-formatted-string.title') as HTMLElement | null)?.textContent?.trim() || 'Unknown Playlist'
+    sendResponse({ tracks, playlistTitle })
+    return true
+  }
+  return false
+})
 
 interface TrackInfo {
   trackStart: number // minutes from journey start

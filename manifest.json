@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Setflow",
   "description": "Track your journey phases on YouTube Music",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "permissions": ["storage"],
   "action": {
     "default_popup": "src/popup/index.html",

@@ -1,4 +1,4 @@
-import { StorageData, Session, Preset, DEFAULT_PRESETS } from './types'
+import { StorageData, Session, Preset, DEFAULT_PRESETS, DraftFormState, SavedJourney } from './types'
 
 const STORAGE_KEY = 'setflow'
 
@@ -7,6 +7,8 @@ const defaultData: StorageData = {
   presets: DEFAULT_PRESETS,
   overlayMinimized: false,
   overlayPosition: null,
+  draftFormState: null,
+  savedJourneys: {},
 }
 
 export async function getStorageData(): Promise<StorageData> {
@@ -95,4 +97,42 @@ export function onStorageChange(
 
   chrome.storage.onChanged.addListener(listener)
   return () => chrome.storage.onChanged.removeListener(listener)
+}
+
+// Draft form state functions
+export async function saveDraftFormState(draft: DraftFormState): Promise<void> {
+  await setStorageData({ draftFormState: draft })
+}
+
+export async function getDraftFormState(): Promise<DraftFormState | null> {
+  const data = await getStorageData()
+  return data.draftFormState || null
+}
+
+export async function clearDraftFormState(): Promise<void> {
+  await setStorageData({ draftFormState: null })
+}
+
+// Saved journey functions
+export async function getSavedJourney(playlistUrl: string): Promise<SavedJourney | null> {
+  const data = await getStorageData()
+  return data.savedJourneys?.[playlistUrl] || null
+}
+
+export async function saveJourney(journey: SavedJourney): Promise<void> {
+  const data = await getStorageData()
+  const savedJourneys = { ...data.savedJourneys, [journey.playlistUrl]: journey }
+  await setStorageData({ savedJourneys })
+}
+
+export async function deleteJourney(playlistUrl: string): Promise<void> {
+  const data = await getStorageData()
+  const savedJourneys = { ...data.savedJourneys }
+  delete savedJourneys[playlistUrl]
+  await setStorageData({ savedJourneys })
+}
+
+export async function listJourneys(): Promise<SavedJourney[]> {
+  const data = await getStorageData()
+  return Object.values(data.savedJourneys || {})
 }
