@@ -20,6 +20,20 @@ import PresetManager from './components/PresetManager'
 type Tab = 'session' | 'presets'
 type DurationPreset = '2h' | '4h' | '6h' | '8h' | '12h' | 'custom'
 
+// Helper to safely send message to content script (handles "Receiving end does not exist" error)
+function sendMessageToContentScript<T>(tabId: number, message: object): Promise<T | null> {
+  return new Promise((resolve) => {
+    chrome.tabs.sendMessage(tabId, message, (response) => {
+      if (chrome.runtime.lastError) {
+        // Content script not available (e.g., not on YouTube Music)
+        resolve(null)
+      } else {
+        resolve(response as T)
+      }
+    })
+  })
+}
+
 export default function App() {
   const [tab, setTab] = useState<Tab>('session')
   const [phases, setPhases] = useState<Phase[]>(DEFAULT_PHASES)
@@ -76,33 +90,27 @@ export default function App() {
       setPresets(loadedPresets)
 
       // Try to get playlist URL from content script
-      try {
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-        if (tabs[0]?.id) {
-          chrome.tabs.sendMessage(tabs[0].id, { type: 'GET_PLAYLIST_URL' }, async (response) => {
-            if (chrome.runtime.lastError) {
-              // Content script not available
-              return
-            }
-            if (response?.url) {
-              setCurrentPlaylistUrl(response.url)
-              // Check for saved journey
-              const savedJourney = await getSavedJourney(response.url)
-              if (savedJourney && !session) {
-                setJourneyName(savedJourney.name)
-                setPhases(savedJourney.phases.map(p => ({ ...p, id: generateId() })))
-                if (savedJourney.startTime) setStartTime(savedJourney.startTime)
-                if (savedJourney.sunriseTime) setSunriseTime(savedJourney.sunriseTime)
-                if (savedJourney.sunsetTime) setSunsetTime(savedJourney.sunsetTime)
-                if (savedJourney.durationPreset) setDurationPreset(savedJourney.durationPreset as DurationPreset)
-                isInitialLoad.current = false
-                return
-              }
-            }
-          })
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (tabs[0]?.id) {
+        const response = await sendMessageToContentScript<{ url: string | null }>(
+          tabs[0].id,
+          { type: 'GET_PLAYLIST_URL' }
+        )
+        if (response?.url) {
+          setCurrentPlaylistUrl(response.url)
+          // Check for saved journey
+          const savedJourney = await getSavedJourney(response.url)
+          if (savedJourney && !session) {
+            setJourneyName(savedJourney.name)
+            setPhases(savedJourney.phases.map(p => ({ ...p, id: generateId() })))
+            if (savedJourney.startTime) setStartTime(savedJourney.startTime)
+            if (savedJourney.sunriseTime) setSunriseTime(savedJourney.sunriseTime)
+            if (savedJourney.sunsetTime) setSunsetTime(savedJourney.sunsetTime)
+            if (savedJourney.durationPreset) setDurationPreset(savedJourney.durationPreset as DurationPreset)
+            isInitialLoad.current = false
+            return
+          }
         }
-      } catch {
-        // Ignore errors
       }
 
       if (session) {
@@ -191,13 +199,9 @@ export default function App() {
     setActiveSessionState(session)
 
     // Notify content script directly (fallback for storage listener)
-    try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'SESSION_STARTED', session })
-      }
-    } catch {
-      // Content script may not be available
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (tabs[0]?.id) {
+      await sendMessageToContentScript(tabs[0].id, { type: 'SESSION_STARTED', session })
     }
 
     // Save journey if we have a playlist URL and name
@@ -221,13 +225,9 @@ export default function App() {
     setActiveSessionState(null)
 
     // Notify content script directly
-    try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'SESSION_ENDED' })
-      }
-    } catch {
-      // Content script may not be available
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (tabs[0]?.id) {
+      await sendMessageToContentScript(tabs[0].id, { type: 'SESSION_ENDED' })
     }
   }
 
@@ -285,53 +285,52 @@ export default function App() {
   async function handleExportTracklist() {
     if (!activeSession) return
 
-    try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-      if (!tabs[0]?.id) {
-        alert('Please open YouTube Music to export the tracklist')
-        return
-      }
-
-      chrome.tabs.sendMessage(tabs[0].id, { type: 'EXPORT_TRACKLIST' }, (response) => {
-        if (chrome.runtime.lastError) {
-          alert('Could not connect to YouTube Music. Please refresh the page and try again.')
-          return
-        }
-        if (!response || !response.tracks || response.tracks.length === 0) {
-          alert('No tracks found. Make sure the playlist tracks are visible on the page.')
-          return
-        }
-
-        const exportData: ExportedTracklist = {
-          journeyName: activeSession.journeyName || 'Unnamed Journey',
-          playlistUrl: currentPlaylistUrl || '',
-          playlistTitle: response.playlistTitle || 'Unknown Playlist',
-          exportedAt: new Date().toISOString(),
-          session: {
-            startTime: formatTime(new Date(activeSession.startTime)),
-            phases: activeSession.phases,
-            sunriseTime: activeSession.sunriseTime,
-            sunsetTime: activeSession.sunsetTime,
-          },
-          tracks: response.tracks || [],
-          totalDuration: formatDurationCompact((response.tracks || []).reduce((sum: number, t: { durationMinutes: number }) => sum + t.durationMinutes, 0)),
-          totalTracks: (response.tracks || []).length,
-        }
-
-        // Download JSON
-        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `setflow-${(activeSession.journeyName || 'journey').replace(/[^a-z0-9]/gi, '-')}-${Date.now()}.json`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(url)
-      })
-    } catch {
-      alert('Failed to export tracklist')
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (!tabs[0]?.id) {
+      alert('Please open YouTube Music to export the tracklist')
+      return
     }
+
+    const response = await sendMessageToContentScript<{ tracks: ExportedTracklist['tracks']; playlistTitle: string }>(
+      tabs[0].id,
+      { type: 'EXPORT_TRACKLIST' }
+    )
+
+    if (!response) {
+      alert('Could not connect to YouTube Music. Please refresh the page and try again.')
+      return
+    }
+    if (!response.tracks || response.tracks.length === 0) {
+      alert('No tracks found. Make sure the playlist tracks are visible on the page.')
+      return
+    }
+
+    const exportData: ExportedTracklist = {
+      journeyName: activeSession.journeyName || 'Unnamed Journey',
+      playlistUrl: currentPlaylistUrl || '',
+      playlistTitle: response.playlistTitle || 'Unknown Playlist',
+      exportedAt: new Date().toISOString(),
+      session: {
+        startTime: formatTime(new Date(activeSession.startTime)),
+        phases: activeSession.phases,
+        sunriseTime: activeSession.sunriseTime,
+        sunsetTime: activeSession.sunsetTime,
+      },
+      tracks: response.tracks || [],
+      totalDuration: formatDurationCompact((response.tracks || []).reduce((sum, t) => sum + t.durationMinutes, 0)),
+      totalTracks: (response.tracks || []).length,
+    }
+
+    // Download JSON
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `setflow-${(activeSession.journeyName || 'journey').replace(/[^a-z0-9]/gi, '-')}-${Date.now()}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   function formatTime(date: Date): string {
