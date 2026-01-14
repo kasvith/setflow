@@ -232,6 +232,29 @@ export default function App() {
   }
 
   async function handleEndSession() {
+    // Preserve current session values to draft form state before clearing
+    if (activeSession) {
+      const startTimeStr = new Date(activeSession.startTime)
+        .toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+
+      await saveDraftFormState({
+        startTime: startTimeStr,
+        sunriseTime: activeSession.sunriseTime || '',
+        sunsetTime: activeSession.sunsetTime || '',
+        durationPreset,
+        phases: activeSession.phases,
+        journeyName: activeSession.journeyName || '',
+        lastUpdated: Date.now(),
+      })
+
+      // Update local state to match preserved values
+      setStartTime(startTimeStr)
+      setSunriseTime(activeSession.sunriseTime || '')
+      setSunsetTime(activeSession.sunsetTime || '')
+      setPhases(activeSession.phases)
+      setJourneyName(activeSession.journeyName || '')
+    }
+
     await setActiveSession(null)
     setActiveSessionState(null)
 
@@ -265,6 +288,15 @@ export default function App() {
     setDurationPreset('custom')
   }
 
+  async function handleResetForm() {
+    await clearDraftFormState()
+    setStartTime('')
+    setSunriseTime('')
+    setSunsetTime('')
+    setPhases(DEFAULT_PHASES.map((p) => ({ ...p, id: generateId() })))
+    setJourneyName('')
+    setDurationPreset('12h')
+  }
 
   function handleReorderPhases(newPhases: Phase[]) {
     setPhases(newPhases)
@@ -557,9 +589,14 @@ export default function App() {
               </button>
             </div>
           ) : (
-            <button className="btn btn-primary" onClick={handleStartPlanning}>
-              Start Planning
-            </button>
+            <div className="button-row">
+              <button className="btn btn-secondary" onClick={handleResetForm}>
+                Reset
+              </button>
+              <button className="btn btn-primary" onClick={handleStartPlanning}>
+                Start Planning
+              </button>
+            </div>
           )}
 
           <p className="hint">
