@@ -133,9 +133,9 @@ export const DEFAULT_PRESETS: Preset[] = [
     phases: [
       { id: '1', name: 'Onset', duration: 45, color: '#FFB74D' },
       { id: '2', name: 'Come Up', duration: 75, color: '#FF8A65' },
-      { id: '3', name: 'Peak', duration: 180, color: '#E91E63' },
+      { id: '3', name: 'Peak', duration: 240, color: '#E91E63' },
       { id: '4', name: 'Plateau', duration: 180, color: '#9C27B0' },
-      { id: '5', name: 'Comedown', duration: 240, color: '#42A5F5' },
+      { id: '5', name: 'Comedown', duration: 180, color: '#42A5F5' },
     ],
   },
 ]

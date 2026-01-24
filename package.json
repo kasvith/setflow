@@ -1,6 +1,6 @@
 {
   "name": "setflow",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "YouTube Music trip phase tracker",
   "type": "module",
   "scripts": {
