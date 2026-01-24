@@ -488,6 +488,16 @@ body {
   color: #ccc;
 }
 
+.celestial-icon {
+  margin-left: 6px;
+  cursor: help;
+  font-size: 12px;
+}
+
+.celestial-icon:hover {
+  opacity: 0.8;
+}
+
 .phase-schedule-time {
   color: #888;
   font-variant-numeric: tabular-nums;

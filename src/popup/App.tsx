@@ -392,9 +392,44 @@ export default function App() {
         phase,
         startTime: phaseStart.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
         endTime: phaseEnd.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+        startTimestamp: phaseStart.getTime(),
+        endTimestamp: phaseEnd.getTime(),
       }
     })
   }, [activeSession, phases])
+
+  const getCelestialInPhase = (phaseStart: number, phaseEnd: number) => {
+    const events: { type: 'sunrise' | 'sunset'; time: string }[] = []
+    if (activeSession?.sunriseTimestamp &&
+        activeSession.sunriseTimestamp >= phaseStart &&
+        activeSession.sunriseTimestamp < phaseEnd) {
+      events.push({ type: 'sunrise', time: formatTime(new Date(activeSession.sunriseTimestamp)) })
+    }
+    if (activeSession?.sunsetTimestamp &&
+        activeSession.sunsetTimestamp >= phaseStart &&
+        activeSession.sunsetTimestamp < phaseEnd) {
+      events.push({ type: 'sunset', time: formatTime(new Date(activeSession.sunsetTimestamp)) })
+    }
+    return events
+  }
+
+  // Track which celestial events are shown inline with phases
+  const celestialEventsInline = useMemo(() => {
+    const inline = { sunrise: false, sunset: false }
+    for (const { startTimestamp, endTimestamp } of phaseTimeRanges) {
+      if (activeSession?.sunriseTimestamp &&
+          activeSession.sunriseTimestamp >= startTimestamp &&
+          activeSession.sunriseTimestamp < endTimestamp) {
+        inline.sunrise = true
+      }
+      if (activeSession?.sunsetTimestamp &&
+          activeSession.sunsetTimestamp >= startTimestamp &&
+          activeSession.sunsetTimestamp < endTimestamp) {
+        inline.sunset = true
+      }
+    }
+    return inline
+  }, [activeSession, phaseTimeRanges])
 
   if (isOnYouTubeMusic === false) {
     return (
@@ -455,31 +490,45 @@ export default function App() {
                 </span>
               </div>
 
-              {phaseTimeRanges.map(({ phase, startTime, endTime }) => (
-                <div key={phase.id} className="phase-schedule-item">
-                  <span
-                    className="phase-schedule-dot"
-                    style={{ background: phase.color }}
-                  ></span>
-                  <span className="phase-schedule-name">{phase.name}</span>
-                  <span className="phase-schedule-time">
-                    {startTime} – {endTime}
-                  </span>
-                </div>
-              ))}
+              {phaseTimeRanges.map(({ phase, startTime, endTime, startTimestamp, endTimestamp }) => {
+                const celestialEvents = getCelestialInPhase(startTimestamp, endTimestamp)
+                return (
+                  <div key={phase.id} className="phase-schedule-item">
+                    <span
+                      className="phase-schedule-dot"
+                      style={{ background: phase.color }}
+                    ></span>
+                    <span className="phase-schedule-name">
+                      {phase.name}
+                      {celestialEvents.map(e => (
+                        <span
+                          key={e.type}
+                          className="celestial-icon"
+                          title={`${e.type === 'sunrise' ? 'Sunrise' : 'Sunset'} at ${e.time}`}
+                        >
+                          {e.type === 'sunrise' ? '☀️' : '🌙'}
+                        </span>
+                      ))}
+                    </span>
+                    <span className="phase-schedule-time">
+                      {startTime} – {endTime}
+                    </span>
+                  </div>
+                )
+              })}
 
-              {activeSession.sunriseTime && (
+              {activeSession.sunriseTimestamp && !celestialEventsInline.sunrise && (
                 <div className="phase-schedule-item">
                   <span className="phase-schedule-dot" style={{ background: '#FFB74D' }}></span>
-                  <span className="phase-schedule-name">Sunrise</span>
-                  <span className="phase-schedule-time">{activeSession.sunriseTime}</span>
+                  <span className="phase-schedule-name">☀️ Sunrise</span>
+                  <span className="phase-schedule-time">{formatTime(new Date(activeSession.sunriseTimestamp))}</span>
                 </div>
               )}
-              {activeSession.sunsetTime && (
+              {activeSession.sunsetTimestamp && !celestialEventsInline.sunset && (
                 <div className="phase-schedule-item">
                   <span className="phase-schedule-dot" style={{ background: '#5C6BC0' }}></span>
-                  <span className="phase-schedule-name">Sunset</span>
-                  <span className="phase-schedule-time">{activeSession.sunsetTime}</span>
+                  <span className="phase-schedule-name">🌙 Sunset</span>
+                  <span className="phase-schedule-time">{formatTime(new Date(activeSession.sunsetTimestamp))}</span>
                 </div>
               )}
             </div>
