@@ -129,7 +129,7 @@ export const DEFAULT_PRESETS: Preset[] = [
     ],
   },
   {
-    name: '12h Standard',
+    name: 'Classic 12h',
     phases: [
       { id: '1', name: 'Onset', duration: 45, color: '#FFB74D' },
       { id: '2', name: 'Come Up', duration: 75, color: '#FF8A65' },
