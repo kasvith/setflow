@@ -25,20 +25,20 @@ export interface DraftFormState {
   startTime: string
   sunriseTime: string
   sunsetTime: string
-  durationPreset: string
   phases: Phase[]
   journeyName: string
+  playlistUrl?: string // the draft belongs to this playlist; another playlist starts fresh
   lastUpdated: number
 }
 
 export interface SavedJourney {
   name: string
   playlistUrl: string
+  playlistTitle?: string
   phases: Phase[]
   startTime?: string
   sunriseTime?: string
   sunsetTime?: string
-  durationPreset?: string
   createdAt: number
   updatedAt: number
 }
@@ -76,8 +76,6 @@ export interface ExportedTracklist {
 export interface StorageData {
   activeSession: Session | null
   presets: Preset[]
-  overlayMinimized: boolean
-  overlayPosition: { x: number; y: number } | null
   draftFormState: DraftFormState | null
   savedJourneys: Record<string, SavedJourney>
 }

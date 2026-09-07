@@ -30,13 +30,21 @@ function isTracking(): boolean {
   return !!session && (!session.playlistUrl || session.playlistUrl === getCurrentPlaylistUrl())
 }
 
+function getPlaylistTitle(): string | null {
+  const el = document.querySelector(
+    'ytmusic-responsive-header-renderer yt-formatted-string.title, ytmusic-detail-header-renderer yt-formatted-string.title, h2.title'
+  )
+  return el?.textContent?.trim() || null
+}
+
 // Notify popup of URL change
 function notifyUrlChange() {
   if (!isExtensionContextValid()) return
 
   chrome.runtime.sendMessage({
     type: 'URL_CHANGED',
-    url: getCurrentPlaylistUrl()
+    url: getCurrentPlaylistUrl(),
+    title: getPlaylistTitle(),
   }).catch(() => {
     // Popup might not be open or context invalidated, ignore error
   })
@@ -47,8 +55,9 @@ function notifyUrlChange() {
 // pushState/replaceState/back/forward. (Types for it are not in this TS lib yet.)
 const navigation = (window as Window & { navigation?: EventTarget }).navigation
 navigation?.addEventListener('currententrychange', () => {
-  notifyUrlChange()
   sync()
+  // The new page's header renders after the URL changes; wait for it so the title is fresh
+  setTimeout(notifyUrlChange, 1000)
 })
 
 // Format time from session start minutes
@@ -144,12 +153,12 @@ if (isExtensionContextValid()) {
     if (!isExtensionContextValid()) return false
 
     if (message.type === 'GET_PLAYLIST_URL') {
-      sendResponse({ url: getCurrentPlaylistUrl() })
+      sendResponse({ url: getCurrentPlaylistUrl(), title: getPlaylistTitle() })
       return true
     }
     if (message.type === 'EXPORT_TRACKLIST') {
       const tracks = extractTrackData()
-      const playlistTitle = (document.querySelector('h2.title, ytmusic-detail-header-renderer yt-formatted-string.title') as HTMLElement | null)?.textContent?.trim() || 'Unknown Playlist'
+      const playlistTitle = getPlaylistTitle() || 'Unknown Playlist'
       sendResponse({ tracks, playlistTitle })
       return true
     }

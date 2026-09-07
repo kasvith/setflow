@@ -1,7 +1,7 @@
 // Run: pnpm test  (Node 24 strips types natively)
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { getPhasesInRange } from '../src/shared/utils.ts'
+import { getPhasesInRange, phaseWindows, resolveStartTimestamp } from '../src/shared/utils.ts'
 
 const session = {
   startTime: 0,
@@ -30,4 +30,19 @@ test('track ending exactly on a boundary belongs only to the first phase', () =>
 
 test('track past every phase has none', () => {
   assert.deepEqual(names(30, 34), [])
+})
+
+test('resolveStartTimestamp keeps a start a few minutes ago today', () => {
+  const now = new Date(2026, 8, 7, 21, 5).getTime()
+  assert.equal(resolveStartTimestamp('21:00', 720, now), new Date(2026, 8, 7, 21, 0).getTime())
+})
+
+test('resolveStartTimestamp rolls a journey that would already be over to tomorrow', () => {
+  const now = new Date(2026, 8, 7, 20, 20).getTime()
+  assert.equal(resolveStartTimestamp('04:30', 720, now), new Date(2026, 8, 8, 4, 30).getTime())
+})
+
+test('phaseWindows chains phase end to next start', () => {
+  const w = phaseWindows(session.phases, 1000)
+  assert.deepEqual(w.map((x) => [x.start, x.end]), [[1000, 601000], [601000, 1801000]])
 })

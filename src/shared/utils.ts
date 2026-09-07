@@ -1,97 +1,5 @@
 import type { Phase, Session } from './types'
 
-export interface PhaseInfo {
-  phase: Phase
-  index: number
-  startTime: number // minutes from session start
-  endTime: number // minutes from session start
-  elapsedInPhase: number // minutes elapsed in this phase
-  remainingInPhase: number // minutes remaining in this phase
-  progress: number // 0-1
-}
-
-export interface SessionInfo {
-  elapsedMinutes: number
-  elapsedFormatted: string
-  currentPhase: PhaseInfo | null
-  phases: PhaseInfo[]
-  isComplete: boolean
-  totalDuration: number
-}
-
-export function calculateSessionInfo(session: Session): SessionInfo {
-  const now = Date.now()
-  const elapsedMs = now - session.startTime
-  const elapsedMinutes = elapsedMs / (1000 * 60)
-
-  const phases: PhaseInfo[] = []
-  let accumulatedTime = 0
-
-  for (let i = 0; i < session.phases.length; i++) {
-    const phase = session.phases[i]
-    const startTime = accumulatedTime
-    const endTime = accumulatedTime + phase.duration
-
-    const elapsedInPhase = Math.max(0, Math.min(phase.duration, elapsedMinutes - startTime))
-    const remainingInPhase = Math.max(0, phase.duration - elapsedInPhase)
-    const progress = elapsedInPhase / phase.duration
-
-    phases.push({
-      phase,
-      index: i,
-      startTime,
-      endTime,
-      elapsedInPhase,
-      remainingInPhase,
-      progress,
-    })
-
-    accumulatedTime = endTime
-  }
-
-  const totalDuration = accumulatedTime
-  const isComplete = elapsedMinutes >= totalDuration
-
-  let currentPhase: PhaseInfo | null = null
-  for (const phaseInfo of phases) {
-    if (elapsedMinutes >= phaseInfo.startTime && elapsedMinutes < phaseInfo.endTime) {
-      currentPhase = phaseInfo
-      break
-    }
-  }
-
-  // If elapsed is beyond all phases, current is the last one (or null if complete)
-  if (!currentPhase && !isComplete && phases.length > 0) {
-    currentPhase = phases[phases.length - 1]
-  }
-
-  return {
-    elapsedMinutes,
-    elapsedFormatted: formatDuration(elapsedMinutes),
-    currentPhase,
-    phases,
-    isComplete,
-    totalDuration,
-  }
-}
-
-export function formatDuration(minutes: number): string {
-  const hours = Math.floor(minutes / 60)
-  const mins = Math.floor(minutes % 60)
-  const secs = Math.floor((minutes * 60) % 60)
-
-  if (hours > 0) {
-    return `${hours}h ${mins}m`
-  }
-  return `${mins}m ${secs}s`
-}
-
-export function formatTime(minutes: number): string {
-  const hours = Math.floor(minutes / 60)
-  const mins = Math.floor(minutes % 60)
-  return `${hours}:${mins.toString().padStart(2, '0')}`
-}
-
 export function getPhaseAtTime(session: Session, minutesFromStart: number): Phase | null {
   let accumulatedTime = 0
 
@@ -125,6 +33,39 @@ export function getPhasesInRange(
   }
 
   return overlaps
+}
+
+// Absolute start/end timestamps of each phase for a journey starting at `start`
+export function phaseWindows(
+  phases: Phase[],
+  start: number
+): { phase: Phase; start: number; end: number }[] {
+  let t = start
+  return phases.map((phase) => {
+    const window = { phase, start: t, end: t + phase.duration * 60 * 1000 }
+    t = window.end
+    return window
+  })
+}
+
+export function formatClock(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+// A typed start clock time ("04:30") as a timestamp. A journey that would already be over
+// by now can't be what was meant, so it rolls to tomorrow; a start a few minutes ago stays today.
+export function resolveStartTimestamp(
+  timeInput: string,
+  totalMinutes: number,
+  now: number = Date.now()
+): number {
+  if (!timeInput) return now
+  const [hours, minutes] = timeInput.split(':').map(Number)
+  const date = new Date(now)
+  date.setHours(hours, minutes, 0, 0)
+  let start = date.getTime()
+  if (start + totalMinutes * 60 * 1000 < now) start += 24 * 60 * 60 * 1000
+  return start
 }
 
 export function generateId(): string {
