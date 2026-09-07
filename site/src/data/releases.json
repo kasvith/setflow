@@ -1,0 +1,106 @@
+[
+  {
+    "tag_name": "v0.1.0",
+    "published_at": "2026-09-07T17:18:46Z",
+    "html_url": "https://github.com/kasvith/setflow/releases/tag/v0.1.0",
+    "body": "## [0.1.0] - 2026-09-07\n\n### Bug Fixes\n\n- Work in tabs that were open before the extension (re)loaded\n- Surface out-of-window sunrise/sunset, End planning button, static page header\n- Popup is a planner, not a live tracker\n- Stop observer self-trigger loop, track SPA navigation, split stripes across phases\n\n### Features\n\n- Detailed, scrubbable plan header on the playlist page\n- Journey library, playlist-name default, and a redesigned popup\n\n### Release\n\n- V0.1.0\n\n### Testing\n\n- Add vitest.config.ts missed from the previous commit\n- Switch to Vitest, colocate the test with utils\n\n### Build\n\n- Enable React Compiler for the popup\n\n### Ci\n\n- Latest action majors on both workflows, Node 24 and tests in release\n- Run tests on Node 24\n\n",
+    "assets": [
+      {
+        "name": "setflow-extension.zip",
+        "browser_download_url": "https://github.com/kasvith/setflow/releases/download/v0.1.0/setflow-extension.zip",
+        "size": 123098
+      }
+    ]
+  },
+  {
+    "tag_name": "v0.0.7",
+    "published_at": "2026-01-24T17:41:38Z",
+    "html_url": "https://github.com/kasvith/setflow/releases/tag/v0.0.7",
+    "body": "## [0.0.7] - 2026-01-24\n\n### Release\n\n- Sync manifest version to 0.0.7\n- V0.0.7\n\n",
+    "assets": [
+      {
+        "name": "setflow-extension.zip",
+        "browser_download_url": "https://github.com/kasvith/setflow/releases/download/v0.0.7/setflow-extension.zip",
+        "size": 84228
+      }
+    ]
+  },
+  {
+    "tag_name": "v0.0.6",
+    "published_at": "2026-01-24T16:21:56Z",
+    "html_url": "https://github.com/kasvith/setflow/releases/tag/v0.0.6",
+    "body": "## [0.0.6] - 2026-01-24\n\n### Bug Fixes\n\n- Rename preset to Classic 12h\n\n### Features\n\n- Show celestial events inline with phases\n- Add 12h Standard preset with 5 phases\n\n### Release\n\n- V0.0.6\n\n",
+    "assets": [
+      {
+        "name": "setflow-extension.zip",
+        "browser_download_url": "https://github.com/kasvith/setflow/releases/download/v0.0.6/setflow-extension.zip",
+        "size": 84229
+      }
+    ]
+  },
+  {
+    "tag_name": "v0.0.5",
+    "published_at": "2026-01-14T04:11:55Z",
+    "html_url": "https://github.com/kasvith/setflow/releases/tag/v0.0.5",
+    "body": "## [0.0.5] - 2026-01-14\n\n### Documentation\n\n- Update changelog for v0.0.4\n\n### Features\n\n- Persist form values after ending journey and add reset button\n\n### Release\n\n- V0.0.5\n\n",
+    "assets": [
+      {
+        "name": "setflow-extension.zip",
+        "browser_download_url": "https://github.com/kasvith/setflow/releases/download/v0.0.5/setflow-extension.zip",
+        "size": 83863
+      }
+    ]
+  },
+  {
+    "tag_name": "v0.0.4",
+    "published_at": "2026-01-03T08:19:59Z",
+    "html_url": "https://github.com/kasvith/setflow/releases/tag/v0.0.4",
+    "body": "## [0.0.4] - 2026-01-03\n\n### Bug Fixes\n\n- Handle connection errors when content script unavailable\n\n### Features\n\n- Disable popup UI when not on YouTube Music\n\n### Performance\n\n- Fix memory leaks and optimize performance\n\n### Release\n\n- V0.0.4\n\n",
+    "assets": [
+      {
+        "name": "setflow-extension.zip",
+        "browser_download_url": "https://github.com/kasvith/setflow/releases/download/v0.0.4/setflow-extension.zip",
+        "size": 83768
+      }
+    ]
+  },
+  {
+    "tag_name": "v0.0.3",
+    "published_at": "2026-01-03T06:50:57Z",
+    "html_url": "https://github.com/kasvith/setflow/releases/tag/v0.0.3",
+    "body": "### Features\r\n\r\n- **presets:** Add Quick 2h, Medium 4h, and Extended 6h duration presets with unique phase names\r\n  - Quick 2h: Intro, Body, Outro (3 phases)\r\n  - Medium 4h: Opening, Main, Closing (3 phases)\r\n  - Extended 6h: Warm-up, Build, Drop, Cool (4 phases)\r\n- **journey:** Allow users to name their journey with automatic playlist URL linking\r\n- **journey:** Auto-restore saved journey settings when returning to the same playlist\r\n- **export:** Export tracklist as JSON with full track details (name, artist, duration, timing, phase info, YouTube URL)\r\n- **persistence:** Auto-save form state (draft) when popup closes, restore on next open\r\n- **navigation:** Detect playlist URL changes and load appropriate saved journey\r\n- **navigation:** Show warning when navigated away from active session's playlist\r\n\r\n### Bug Fixes\r\n\r\n- **export:** Fix track extraction for different YouTube Music page layouts\r\n- **ui:** Fix preset list styling - name now takes full width with dots and delete aligned right\r\n- **ui:** Improve \"Restore Defaults\" button styling\r\n\r\n### Changes\r\n\r\n- **ui:** Duration is now read-only display (edit phases directly instead)\r\n- **ui:** Remove AM/PM restrictions on sunrise/sunset times for polar region support\r\n- **performance:** Use History API events for URL change detection instead of polling\r\n",
+    "assets": [
+      {
+        "name": "setflow-extension.zip",
+        "browser_download_url": "https://github.com/kasvith/setflow/releases/download/v0.0.3/setflow-extension.zip",
+        "size": 83258
+      }
+    ]
+  },
+  {
+    "tag_name": "v0.0.2",
+    "published_at": "2026-01-01T17:37:22Z",
+    "html_url": "https://github.com/kasvith/setflow/releases/tag/v0.0.2",
+    "body": "**Full Changelog**: https://github.com/kasvith/setflow/compare/v0.0.1...v0.0.2",
+    "assets": [
+      {
+        "name": "setflow-extension.zip",
+        "browser_download_url": "https://github.com/kasvith/setflow/releases/download/v0.0.2/setflow-extension.zip",
+        "size": 81083
+      }
+    ]
+  },
+  {
+    "tag_name": "v0.0.1",
+    "published_at": "2026-01-01T16:49:08Z",
+    "html_url": "https://github.com/kasvith/setflow/releases/tag/v0.0.1",
+    "body": "Create beautiful playlists\r\n\r\n**Full Changelog**: https://github.com/kasvith/setflow/commits/v0.0.1\r\n",
+    "assets": [
+      {
+        "name": "setflow-extension.zip",
+        "browser_download_url": "https://github.com/kasvith/setflow/releases/download/v0.0.1/setflow-extension.zip",
+        "size": 80988
+      }
+    ]
+  }
+]

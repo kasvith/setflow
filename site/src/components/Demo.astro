@@ -1,0 +1,716 @@
+---
+// Live mock of the extension: the popup on the left, a YouTube Music style playlist on the
+// right. Both run on the extension's own shared utils, so the numbers are the real ones.
+---
+
+<div class="sf-demo" id="demo">
+  <div class="sf-popup" data-popup aria-label="Setflow popup, interactive mock"></div>
+  <div class="sf-yt" data-yt aria-label="YouTube Music playlist, interactive mock">
+    <div class="yt-nav">
+      <span class="yt-logo"><span class="yt-dot"></span>Music</span>
+      <span class="yt-search">Search songs, albums, artists</span>
+    </div>
+    <div class="yt-body">
+      <div class="yt-head">
+        <div class="yt-cover"><img src="/art/01.jpg" alt=""><img src="/art/08.jpg" alt=""><img src="/art/11.jpg" alt=""><img src="/art/25.jpg" alt=""></div>
+        <div class="yt-head-text">
+          <div class="yt-kind">Playlist</div>
+          <div class="yt-title">Night Drive</div>
+          <div class="yt-meta" data-yt-meta></div>
+          <div class="yt-buttons"><span class="yt-btn primary">▶ Play</span><span class="yt-btn">Shuffle</span></div>
+        </div>
+      </div>
+      <div class="sf-header" data-header></div>
+      <div class="yt-rows" data-rows></div>
+    </div>
+    <div class="sf-popover" data-popover hidden></div>
+  </div>
+</div>
+
+<script>
+  import {
+    formatClock,
+    formatDurationCompact,
+    getPhaseAtTime,
+    getPhasesInRange,
+    parseDuration,
+    phaseWindows,
+    resolveStartTimestamp,
+    timeInputToTimestamp,
+  } from '../../../src/shared/utils'
+  import { DEFAULT_PRESETS, type Phase, type Preset, type Session } from '../../../src/shared/types'
+
+  const COLORS = [
+    '#FFB74D', '#FF8A65', '#E91E63', '#F06292', '#BA68C8',
+    '#9C27B0', '#7E57C2', '#5C6BC0', '#42A5F5', '#26C6DA',
+    '#26A69A', '#66BB6A', '#9CCC65', '#FFEE58', '#FFA726',
+  ]
+  // Real tracks and lengths, in a night-drive order: mellow open, build, peak, wind down
+  const tracks = [
+    ['Lailonie', 'Marsh', 'Lailonie', 226],
+    ['Beyond Beliefs', 'Ben Böhmer', 'Beyond Beliefs', 314],
+    ['Home', 'Marsh', 'Home', 271],
+    ['Come Together', 'Nox Vahn & Marsh', 'Come Together / Naturish', 222],
+    ['Night Walk', 'YOTTO', 'Erased Dreams', 283],
+    ['Road (feat. Arctic Lake)', 'Lane 8', 'Brightest Lights', 238],
+    ['Because You Move Me', 'Tinlicker & Helsloot', 'Because You Move Me', 196],
+    ['Blue Sky Action (feat. Alex Vargas)', 'Above & Beyond', 'We Are All We Need', 284],
+    ['Is This Trance?', 'YOTTO', 'Is This Trance?', 289],
+    ['Sun & Moon (feat. Richard Bedford)', 'Above & Beyond', 'Group Therapy', 326],
+    ['Faded', 'Alan Walker', 'Faded', 213],
+    ['Thing Called Love (feat. Richard Bedford)', 'Above & Beyond', 'Group Therapy', 329],
+    ['I / Y', 'Lane 8 & YOTTO', 'I / Y', 354],
+    ['The Spectre', 'Alan Walker', 'The Spectre', 194],
+    ['Run Away (feat. Felix Raphael)', 'Ben Böhmer & Tinlicker', 'Run Away', 262],
+    ['Alchemy (feat. Zoë Johnston)', 'Above & Beyond', 'Group Therapy', 317],
+    ['Northern Soul (feat. Richard Bedford)', 'Above & Beyond', 'Common Ground', 336],
+    ['Darkside (feat. Au/Ra & Tomine Harket)', 'Alan Walker', 'Darkside', 212],
+    ['Fractal', 'Tinlicker', 'This Is Not Our Universe', 317],
+    ['No Ending', 'YOTTO & Julia Church', 'Growth', 257],
+    ['Grapevine (feat. Elderbrook)', 'Lane 8', 'Grapevine', 381],
+    ['Rust', 'Ben Böhmer', 'Bloom', 275],
+    ['Dream of Love (feat. Mimi Page)', 'Nox Vahn', 'Dream of Love', 387],
+    ['Traveller', 'Hraach & Armen Miran', 'Nervous Layers', 382],
+    ['For Eternity', 'Armen Miran', 'For Eternity', 411],
+    ['Hymn', 'Marsh', 'Endless', 267],
+    ['Lullaby', 'Hraach & Armen Miran', 'Summer Sol', 373],
+    ['Save My Soul', 'Armen Miran', 'For Eternity', 349],
+  ].map(([title, artist, album, seconds]) => ({ title: title as string, artist: artist as string, album: album as string, seconds: seconds as number }))
+
+  const plan = {
+    name: 'Dusk till dawn',
+    start: '18:30',
+    sunrise: '06:10',
+    sunset: '19:05',
+    phases: [
+      { id: 'a', name: 'Warm-up', duration: 25, color: '#FFB74D' },
+      { id: 'b', name: 'Build', duration: 50, color: '#E91E63' },
+      { id: 'c', name: 'Drop', duration: 35, color: '#9C27B0' },
+      { id: 'd', name: 'Cool', duration: 20, color: '#42A5F5' },
+    ] as Phase[],
+  }
+  // The extension ships more presets; the mock lists the ones that read as set planning
+  let presets: Preset[] = DEFAULT_PRESETS.filter((p) => ['Quick 2h', 'Medium 4h', 'Extended 6h'].includes(p.name))
+  let active = false
+  let screen: 'plan' | 'library' = 'plan'
+  let picker: string | null = null
+  let uid = 0
+  const newId = () => `p${++uid}`
+
+  const root = document.getElementById('demo')!
+  const popup = root.querySelector<HTMLElement>('[data-popup]')!
+  const yt = root.querySelector<HTMLElement>('[data-yt]')!
+  const header = yt.querySelector<HTMLElement>('[data-header]')!
+  const rowsEl = yt.querySelector<HTMLElement>('[data-rows]')!
+  const pop = yt.querySelector<HTMLElement>('[data-popover]')!
+
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;')
+  const total = (ps: Phase[]) => ps.reduce((s, p) => s + p.duration, 0)
+  const byId = (id: string) => plan.phases.find((p) => p.id === id)
+  const clamp = (n: number) => Math.max(0, Math.min(1, n))
+  const fmtSec = (sec: number) => `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
+  const fmtShort = (min: number) => (min < 1 ? `${Math.round(min * 60)}s` : `${Math.floor(min)}m ${Math.round((min % 1) * 60)}s`)
+  const clockSec = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })
+
+  function session(): Session {
+    const startTime = resolveStartTimestamp(plan.start, total(plan.phases))
+    return {
+      startTime,
+      phases: plan.phases,
+      journeyName: plan.name,
+      sunriseTimestamp: plan.sunrise ? timeInputToTimestamp(plan.sunrise, startTime) : undefined,
+      sunsetTimestamp: plan.sunset ? timeInputToTimestamp(plan.sunset, startTime) : undefined,
+    }
+  }
+
+  // ---- popup -------------------------------------------------------------------------------
+
+  function stripHTML(phases: Phase[], start: number, sunrise?: number, sunset?: number, compact = false) {
+    const span = total(phases) * 60000 || 1
+    const end = start + span
+    const pct = (t: number) => `${clamp((t - start) / span) * 100}%`
+    const inside = (t?: number): t is number => t !== undefined && t >= start && t < end
+    const ticks =
+      (inside(sunrise) ? `<span class="strip-tick" style="left:${pct(sunrise)}">☀</span>` : '') +
+      (inside(sunset) ? `<span class="strip-tick" style="left:${pct(sunset)}">☾</span>` : '')
+    const labels = compact
+      ? ''
+      : `<div class="strip-labels ${ticks ? 'below-ticks' : ''}"><span>${formatClock(start)}</span><span>${formatClock(end)}</span></div>`
+    const segs = phases.map((p) => `<span style="flex:${p.duration};background:${p.color}" title="${esc(p.name)}"></span>`).join('')
+    return `<div class="strip ${compact ? 'compact' : ''}"><div class="strip-track">${segs}</div>${ticks}${labels}</div>`
+  }
+
+  function notesHTML(s: Session) {
+    const end = s.startTime + total(s.phases) * 60000
+    return ([['☀ Sunrise', s.sunriseTimestamp], ['☾ Sunset', s.sunsetTimestamp]] as [string, number | undefined][])
+      .filter(([, t]) => t !== undefined && (t < s.startTime || t >= end))
+      .map(([label, t]) =>
+        t! < s.startTime
+          ? `<p class="strip-note">${label} ${formatClock(t!)} is ${formatDurationCompact(Math.round((s.startTime - t!) / 60000))} before the plan starts</p>`
+          : `<p class="strip-note">${label} ${formatClock(t!)} is ${formatDurationCompact(Math.round((t! - end) / 60000))} after it ends</p>`
+      )
+      .join('')
+  }
+
+  function rangeHTML(s: Session, from: number, to: number) {
+    const mark = (t: number | undefined, icon: string) => (t !== undefined && t >= from && t < to ? `${icon} ` : '')
+    return `${mark(s.sunriseTimestamp, '☀')}${mark(s.sunsetTimestamp, '☾')}${formatClock(from)} – ${formatClock(to)}`
+  }
+
+  function libraryHTML() {
+    const row = (name: string, sub: string, phases: Phase[], action: string) =>
+      `<div class="lib-row"><div class="lib-main"><div class="lib-name">${esc(name)}</div><div class="lib-sub">${esc(sub)}</div>${stripHTML(phases, 0, undefined, undefined, true)}</div><div class="lib-actions">${action}</div></div>`
+    return `<header class="topbar"><button type="button" class="link" data-act="back">← Back</button><span class="wordmark">Library</span></header>
+      <section class="library-group"><h3 class="group-title">Journeys</h3>
+        ${row(plan.name || 'Journey', `Night Drive, ${formatDurationCompact(total(plan.phases))}, used today`, plan.phases, '<button type="button" class="link" data-act="back">Open</button>')}
+      </section>
+      <section class="library-group"><div class="group-head"><h3 class="group-title">Presets</h3></div>
+        ${presets.map((p, i) => row(p.name, `${p.phases.map((x) => x.name).join(', ')}, ${formatDurationCompact(total(p.phases))}`, p.phases, `<button type="button" class="link" data-act="use" data-i="${i}">Use</button>`)).join('')}
+        <div class="save-preset"><input type="text" placeholder="Save current phases (${formatDurationCompact(total(plan.phases))}) as…" aria-label="New preset name" data-preset-name><button type="button" class="btn btn-secondary" data-act="save-preset">Save preset</button></div>
+      </section>`
+  }
+
+  function renderPopup() {
+    if (screen === 'library') {
+      popup.innerHTML = libraryHTML()
+      return
+    }
+    const s = session()
+    const dis = active ? 'disabled' : ''
+    const rows = phaseWindows(s.phases, s.startTime)
+      .map(
+        ({ phase, start, end }) => `<div class="phase-row">
+        <div class="swatch-wrap"><button type="button" class="swatch" style="background:${phase.color}" data-act="swatch" data-id="${phase.id}" aria-label="${esc(phase.name)} colour" ${dis}></button>
+          ${picker === phase.id ? `<div class="color-picker">${COLORS.map((c) => `<button type="button" class="color-option ${c === phase.color ? 'selected' : ''}" style="background:${c}" data-act="color" data-id="${phase.id}" data-color="${c}" aria-label="${c}"></button>`).join('')}</div>` : ''}
+        </div>
+        <input type="text" class="phase-name" value="${esc(phase.name)}" data-field="phase-name" data-id="${phase.id}" aria-label="Phase name" ${dis}>
+        <span class="phase-range" data-range="${phase.id}">${rangeHTML(s, start, end)}</span>
+        <input type="text" class="phase-duration" value="${formatDurationCompact(phase.duration)}" data-field="duration" data-id="${phase.id}" aria-label="Phase duration" placeholder="1h30m" ${dis}>
+        <button type="button" class="icon-btn" data-act="delete" data-id="${phase.id}" aria-label="Remove ${esc(phase.name)}" ${dis}>×</button>
+      </div>`
+      )
+      .join('')
+    const footer = active
+      ? ''
+      : '<div class="phase-footer"><button type="button" class="link" data-act="add">+ Add phase</button><button type="button" class="link" data-act="library">Use a preset</button></div>'
+    const strip = `<div data-strip>${stripHTML(s.phases, s.startTime, s.sunriseTimestamp, s.sunsetTimestamp)}</div><div data-notes>${notesHTML(s)}</div>`
+    const head = active
+      ? `<div class="journey-head"><h2 class="journey-title">${esc(plan.name) || 'Journey'}</h2></div><p class="subline">Planning this playlist. Its tracks are marked by phase.</p>${strip}`
+      : `<div class="journey-head"><input type="text" class="name-input" value="${esc(plan.name)}" placeholder="Journey name" aria-label="Journey name" data-field="name"></div><p class="subline">Linked to this playlist</p>${strip}
+        <div class="times">
+          <label class="field">Start<input type="time" value="${plan.start}" data-field="start"></label>
+          <label class="field">☀ Sunrise<input type="time" value="${plan.sunrise}" data-field="sunrise"></label>
+          <label class="field">☾ Sunset<input type="time" value="${plan.sunset}" data-field="sunset"></label>
+        </div>`
+    const actions = active
+      ? '<div class="actions"><button type="button" class="btn btn-secondary" data-act="export">Export JSON</button><button type="button" class="btn btn-primary" data-act="end">End planning</button></div>'
+      : `<button type="button" class="btn btn-primary" data-act="start" ${plan.phases.length ? '' : 'disabled'}>Start planning</button>`
+    popup.innerHTML = `<header class="topbar"><span class="wordmark">Setflow</span><button type="button" class="link" data-act="library">Library</button></header>${head}<div class="phase-list">${rows}${footer}</div>${actions}`
+  }
+
+  // Values changed but not the structure: patch the bits that show them and redo the playlist
+  function refresh() {
+    const s = session()
+    const strip = popup.querySelector('[data-strip]')
+    if (strip) strip.innerHTML = stripHTML(s.phases, s.startTime, s.sunriseTimestamp, s.sunsetTimestamp)
+    const notes = popup.querySelector('[data-notes]')
+    if (notes) notes.innerHTML = notesHTML(s)
+    for (const { phase, start, end } of phaseWindows(s.phases, s.startTime)) {
+      const el = popup.querySelector(`[data-range="${phase.id}"]`)
+      if (el) el.innerHTML = rangeHTML(s, start, end)
+    }
+    renderPlaylist(s)
+  }
+
+  popup.addEventListener('input', (e) => {
+    const el = e.target as HTMLInputElement
+    const field = el.dataset.field
+    if (field === 'name') plan.name = el.value
+    else if (field === 'start' || field === 'sunrise' || field === 'sunset') plan[field] = el.value
+    else if (field === 'phase-name') {
+      const p = byId(el.dataset.id!)
+      if (p) p.name = el.value
+    } else return
+    refresh()
+  })
+
+  popup.addEventListener('change', (e) => {
+    const el = e.target as HTMLInputElement
+    if (el.dataset.field !== 'duration') return
+    const p = byId(el.dataset.id!)
+    const parsed = parseDuration(el.value.trim())
+    if (p && parsed !== null && parsed > 0) p.duration = parsed
+    if (p) el.value = formatDurationCompact(p.duration)
+    refresh()
+  })
+
+  popup.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return
+    const el = e.target as HTMLInputElement
+    if (el.dataset.field === 'duration') el.blur()
+    if (el.hasAttribute('data-preset-name')) savePreset()
+  })
+
+  function savePreset() {
+    const input = popup.querySelector<HTMLInputElement>('[data-preset-name]')
+    const name = input?.value.trim()
+    if (!name) return
+    presets = [...presets.filter((p) => p.name !== name), { name, phases: plan.phases.map((p) => ({ ...p })) }]
+    renderPopup()
+  }
+
+  popup.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest<HTMLElement>('[data-act]')
+    if (!btn) return
+    const { act, id = '', color = '', i = '0' } = btn.dataset
+    switch (act) {
+      case 'swatch':
+        picker = picker === id ? null : id
+        break
+      case 'color': {
+        const p = byId(id)
+        if (p) p.color = color
+        picker = null
+        break
+      }
+      case 'delete':
+        plan.phases = plan.phases.filter((p) => p.id !== id)
+        break
+      case 'add':
+        plan.phases = [...plan.phases, { id: newId(), name: 'New phase', duration: 60, color: '#9C27B0' }]
+        break
+      case 'library':
+        screen = 'library'
+        picker = null
+        break
+      case 'back':
+        screen = 'plan'
+        break
+      case 'use':
+        plan.phases = presets[+i].phases.map((p) => ({ ...p, id: newId() }))
+        screen = 'plan'
+        break
+      case 'save-preset':
+        savePreset()
+        return
+      case 'start':
+        active = true
+        picker = null
+        break
+      case 'end':
+        active = false
+        break
+      case 'export':
+        exportJson()
+        return
+    }
+    renderPopup()
+    renderPlaylist(session())
+  })
+
+  function exportJson() {
+    const s = session()
+    const data = {
+      journeyName: plan.name || 'Journey',
+      playlistUrl: 'https://music.youtube.com/playlist?list=demo',
+      playlistTitle: 'Night Drive',
+      exportedAt: new Date().toISOString(),
+      session: { startTime: formatClock(s.startTime), phases: s.phases, sunriseTime: plan.sunrise || undefined, sunsetTime: plan.sunset || undefined },
+      tracks: tracks.map((t, i) => {
+        const info = infos[i]
+        const phase = getPhaseAtTime(s, info.start)
+        return {
+          index: i + 1, name: t.title, artist: t.artist, duration: fmtSec(t.seconds), durationMinutes: info.dur,
+          journeyStartTime: formatClock(s.startTime + info.start * 60000), journeyEndTime: formatClock(s.startTime + info.end * 60000),
+          journeyStartMinutes: info.start, journeyEndMinutes: info.end,
+          phase: phase ? { name: phase.name, color: phase.color } : null, youtubeUrl: null,
+        }
+      }),
+      totalDuration: formatDurationCompact(Math.round(infos[infos.length - 1].end)),
+      totalTracks: tracks.length,
+    }
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }))
+    a.download = `setflow-${(plan.name || 'journey').replace(/[^a-z0-9]/gi, '-')}.json`
+    a.click()
+    URL.revokeObjectURL(a.href)
+  }
+
+  // ---- playlist ----------------------------------------------------------------------------
+
+  interface Info { start: number; end: number; dur: number } // minutes from journey start
+  let infos: Info[] = []
+  let current: Session = session()
+
+  function celestialMinutes(s: Session) {
+    return {
+      sunrise: s.sunriseTimestamp !== undefined ? (s.sunriseTimestamp - s.startTime) / 60000 : null,
+      sunset: s.sunsetTimestamp !== undefined ? (s.sunsetTimestamp - s.startTime) / 60000 : null,
+    }
+  }
+
+  function renderPlaylist(s: Session) {
+    current = s
+    const cel = celestialMinutes(s)
+    let t = 0
+    infos = []
+    rowsEl.innerHTML = tracks
+      .map((track, i) => {
+        const dur = track.seconds / 60
+        const info = { start: t, end: t + dur, dur }
+        t = info.end
+        infos.push(info)
+        const parts = getPhasesInRange(s, info.start, info.end)
+        const style = parts.length
+          ? `--stripe:linear-gradient(to bottom, ${parts.map((p) => `${p.phase.color} ${p.from * 100}% ${p.to * 100}%`).join(', ')});background:linear-gradient(90deg, ${parts[0].phase.color}15 0%, transparent 30%)`
+          : ''
+        const kind = cel.sunrise !== null && info.start <= cel.sunrise && info.end > cel.sunrise ? 'sunrise' : cel.sunset !== null && info.start <= cel.sunset && info.end > cel.sunset ? 'sunset' : null
+        const icon = kind === 'sunrise' ? '☀️' : '🌙'
+        const at = kind ? (((kind === 'sunrise' ? cel.sunrise! : cel.sunset!) - info.start) / dur) * 100 : 0
+        const label = kind ? `<span class="cel-label" data-type="${kind}">${icon} ${kind}</span>` : ''
+        const ind = kind ? `<span class="cel-ind" style="top:${at}%">${icon}</span>` : ''
+        return `<div class="row ${parts.length ? '' : 'beyond'}" data-i="${i}" title="${esc(parts.map((p) => p.phase.name).join(' / '))}" style="${style}"><img class="thumb" src="/art/${String(i + 1).padStart(2, '0')}.jpg" alt="" loading="lazy" width="40" height="40"><span class="tcol"><span class="ttl">${esc(track.title)}</span><span class="sub">${esc(track.artist)}</span></span><span class="alb">${esc(track.album)}</span><span class="fixed">${label}<span class="dur">${fmtSec(track.seconds)}</span></span>${ind}</div>`
+      })
+      .join('')
+    yt.querySelector('[data-yt-meta]')!.textContent = `${tracks.length} songs · ${formatDurationCompact(Math.round(t)).replace('h', 'h ').trim()}`
+    renderHeader(s, t)
+  }
+
+  function renderHeader(s: Session, music: number) {
+    const span = total(s.phases)
+    const end = s.startTime + span * 60000
+    const pct = (m: number) => `${clamp(m / span) * 100}%`
+    const coverage =
+      music < span
+        ? `${formatDurationCompact(Math.round(music))} of music, ends ${formatClock(s.startTime + music * 60000)}`
+        : music > span + 1
+          ? `${formatDurationCompact(Math.round(music))} of music, ${formatDurationCompact(Math.round(music - span))} past the plan`
+          : `${formatDurationCompact(Math.round(music))} of music, covers the plan`
+    const segs = s.phases.map((p) => `<span style="flex:${p.duration};background:${p.color}"></span>`).join('')
+    const nomusic = music < span ? `<span class="plan-nomusic" style="left:${pct(music)}" title="No music left in the playlist from here"></span>` : ''
+    const ticks = ([[s.sunriseTimestamp, '☀️', 'Sunrise'], [s.sunsetTimestamp, '🌙', 'Sunset']] as [number | undefined, string, string][])
+      .filter(([ts]) => ts !== undefined && ts >= s.startTime && ts < end)
+      .map(([ts, icon, label]) => `<span class="plan-tick" style="left:${pct((ts! - s.startTime) / 60000)}" title="${label} ${formatClock(ts!)}">${icon}</span>`)
+      .join('')
+    let offset = 0
+    const legend = s.phases
+      .map((p) => {
+        const cell = `<span class="plan-cell" style="left:${pct(offset)};width:${pct(p.duration)}"><b>${esc(p.name)}</b> ${formatClock(s.startTime + offset * 60000)}</span>`
+        offset += p.duration
+        return cell
+      })
+      .join('')
+    header.innerHTML = `<div class="plan-head"><div class="plan-title">${esc(plan.name) || 'Setflow plan'}</div><div class="plan-meta"><div>${formatClock(s.startTime)} to ${formatClock(end)}</div><div class="plan-muted">${coverage}</div></div></div>
+      <div class="plan-track"><div class="plan-strip">${segs}${nomusic}<span class="plan-cursor"></span></div>${ticks}</div>
+      <div class="plan-legend">${legend}</div>`
+  }
+
+  function phaseHTML(s: Session, phase: Phase) {
+    const w = phaseWindows(s.phases, s.startTime).find((x) => x.phase === phase)!
+    return `<div class="pop-phase"><span class="pop-dot" style="background:${phase.color}"></span><span class="pop-name">${esc(phase.name)}</span><span class="pop-range">${formatClock(w.start)} – ${formatClock(w.end)}</span></div>`
+  }
+
+  // Above the anchor, or below it when asked or when above would leave the frame
+  function showPopover(html: string, left: number, anchorTop: number, anchorBottom: number, below = false) {
+    pop.innerHTML = html
+    pop.hidden = false
+    const f = yt.getBoundingClientRect()
+    const x = Math.max(8, Math.min(f.width - pop.offsetWidth - 8, left - f.left))
+    let y = anchorTop - f.top - pop.offsetHeight - 8
+    if (below || y < 8) y = anchorBottom - f.top + 8
+    pop.style.transform = `translate(${x}px, ${y}px)`
+  }
+
+  let scrubbed: HTMLElement | null = null
+  function highlight(row: HTMLElement | null, scroll: boolean) {
+    if (scrubbed === row) return
+    scrubbed?.classList.remove('scrub')
+    scrubbed = row
+    if (!row) return
+    row.classList.add('scrub')
+    if (!scroll) return
+    // The list has no scrollbar of its own; scrubbing is what moves it
+    const pad = 8
+    if (row.offsetTop < rowsEl.scrollTop + pad) rowsEl.scrollTo({ top: row.offsetTop - pad, behavior: 'smooth' })
+    else if (row.offsetTop + row.offsetHeight > rowsEl.scrollTop + rowsEl.clientHeight - pad - 24)
+      rowsEl.scrollTo({ top: row.offsetTop + row.offsetHeight - rowsEl.clientHeight + pad + 24, behavior: 'smooth' })
+  }
+
+  // Pointer (or the idle animation) over the plan strip: cursor, the moment there, the track then
+  function scrub(ratio: number) {
+    const s = current
+    const strip = header.querySelector<HTMLElement>('.plan-strip')
+    const cursor = header.querySelector<HTMLElement>('.plan-cursor')
+    if (!strip || !cursor) return
+    const minutes = ratio * total(s.phases)
+    cursor.style.display = 'block'
+    cursor.style.left = `${ratio * 100}%`
+    const phase = getPhaseAtTime(s, minutes)
+    const idx = infos.findIndex((t) => minutes >= t.start && minutes < t.end)
+    highlight(idx >= 0 ? rowsEl.children[idx] as HTMLElement : null, true)
+    let html = `<div class="pop-time">${formatClock(s.startTime + minutes * 60000)}</div>${phase ? phaseHTML(s, phase) : ''}`
+    if (idx >= 0) html += `<div class="pop-track">${esc(tracks[idx].title)}, ${esc(tracks[idx].artist)}</div><div class="pop-pos">Track ${idx + 1} of ${tracks.length}</div>`
+    else html += `<div class="pop-pos">No music left, playlist ends ${formatClock(s.startTime + infos[infos.length - 1].end * 60000)}</div>`
+    const r = strip.getBoundingClientRect()
+    const h = header.getBoundingClientRect()
+    showPopover(html, r.left + ratio * r.width - pop.offsetWidth / 2, h.top, h.bottom, true)
+  }
+
+  function hideScrub() {
+    const cursor = header.querySelector<HTMLElement>('.plan-cursor')
+    if (cursor) cursor.style.display = 'none'
+    highlight(null, false)
+    pop.hidden = true
+  }
+
+  header.addEventListener('pointermove', (e) => {
+    if (!(e.target as HTMLElement).closest('.plan-track')) return
+    const r = header.querySelector('.plan-strip')!.getBoundingClientRect()
+    scrub(clamp((e.clientX - r.left) / r.width))
+  })
+  header.addEventListener('pointerleave', hideScrub)
+
+  // Pointer over a track: the clock at that second, the phase, and any sun event on the track
+  rowsEl.addEventListener('pointermove', (e) => {
+    const row = (e.target as HTMLElement).closest<HTMLElement>('.row')
+    if (!row) return
+    const s = current
+    const info = infos[+row.dataset.i!]
+    const r = row.getBoundingClientRect()
+    const ratio = clamp((e.clientY - r.top) / r.height)
+    const minutes = info.start + info.dur * ratio
+    const ts = s.startTime + minutes * 60000
+    const phase = getPhaseAtTime(s, minutes)
+    const days = Math.floor((ts - s.startTime) / 86400000)
+    let html = `<div class="pop-time">${clockSec(ts)}${days > 0 ? ` <span class="pop-day">+${days}d</span>` : ''}</div>${phase ? phaseHTML(s, phase) : ''}<div class="pop-pos">${fmtSec(ratio * info.dur * 60)} / ${fmtSec(info.dur * 60)}</div>`
+    const cel = celestialMinutes(s)
+    for (const [key, label, icon] of [['sunrise', 'Sunrise', '☀️'], ['sunset', 'Sunset', '🌙']] as const) {
+      const m = cel[key]
+      if (m === null || info.start > m || info.end <= m) continue
+      const d = m - minutes
+      const text = Math.abs(d) < 0.05 ? `${label}!` : d > 0 ? `${label} in ${fmtShort(d)}` : `${label} was ${fmtShort(-d)} ago`
+      html += `<div class="pop-cel ${key} ${d < -0.05 ? 'past' : ''}">${icon} ${text}</div>`
+    }
+    highlight(null, false)
+    showPopover(html, r.left + 20, r.top, r.bottom)
+  })
+  rowsEl.addEventListener('pointerleave', () => (pop.hidden = true))
+
+  // Idle: sweep the strip on its own so the page shows what hovering does; hands off while
+  // the pointer is inside the mock, off-screen, or with reduced motion
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+  let auto = !reduced
+  let visible = true
+  let base = performance.now()
+  let idle: number | undefined
+  const SWEEP = 28000
+  function tick(now: number) {
+    if (auto && visible) scrub(((now - base) % SWEEP) / SWEEP)
+    requestAnimationFrame(tick)
+  }
+  yt.addEventListener('pointerenter', () => {
+    clearTimeout(idle)
+    if (auto) {
+      auto = false
+      hideScrub()
+    }
+  })
+  yt.addEventListener('pointerleave', () => {
+    hideScrub()
+    if (reduced) return
+    clearTimeout(idle)
+    idle = window.setTimeout(() => {
+      base = performance.now()
+      auto = true
+    }, 2500)
+  })
+  new IntersectionObserver(([entry]) => {
+    visible = entry.isIntersecting
+    if (!visible) hideScrub()
+  }).observe(yt)
+
+  renderPopup()
+  renderPlaylist(session())
+  requestAnimationFrame(tick)
+</script>
+
+<style is:global>
+  .sf-demo {
+    display: grid;
+    grid-template-columns: 360px minmax(0, 1fr);
+    gap: 22px;
+    align-items: start;
+  }
+
+  @media (max-width: 960px) {
+    .sf-demo {
+      grid-template-columns: minmax(0, 1fr);
+      justify-items: center;
+    }
+    .sf-demo .sf-yt {
+      width: 100%;
+    }
+  }
+
+  /* ---- popup, the extension's own styles ---------------------------------------------- */
+
+  .sf-popup {
+    width: 360px;
+    max-width: 100%;
+    padding: 12px 16px 16px;
+    background: #14152a;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+    color: var(--ink);
+    font-size: 13px;
+    line-height: 1.45;
+    font-variant-numeric: tabular-nums;
+  }
+  .sf-popup .topbar { display: flex; justify-content: space-between; align-items: baseline; padding-bottom: 10px; margin-bottom: 14px; border-bottom: 1px solid var(--line); }
+  .sf-popup .wordmark { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+  .sf-popup .link { background: none; border: 0; padding: 2px 0; color: var(--muted); cursor: pointer; white-space: nowrap; }
+  .sf-popup .link:hover { color: var(--ink); }
+  .sf-popup .journey-head { display: flex; align-items: center; gap: 10px; }
+  .sf-popup .name-input, .sf-popup .journey-title { flex: 1; min-width: 0; font-size: 20px; font-weight: 600; line-height: 1.3; letter-spacing: 0; }
+  .sf-popup .name-input { background: transparent; border: 0; border-bottom: 1px solid transparent; padding: 2px 0; width: 100%; }
+  .sf-popup .name-input:hover { border-bottom-color: var(--line); }
+  .sf-popup .name-input:focus { outline: none; border-bottom-color: var(--muted); }
+  .sf-popup .name-input::placeholder { color: var(--muted); font-weight: 400; }
+  .sf-popup .journey-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-popup .subline { color: var(--muted); font-size: 12px; margin: 2px 0 12px; }
+  .sf-popup .strip { position: relative; margin: 4px 0; }
+  .sf-popup .strip-track { position: relative; display: flex; gap: 1px; height: 10px; border-radius: 5px; overflow: hidden; }
+  .sf-popup .strip-track > span { display: block; min-width: 2px; transition: flex 0.25s ease; }
+  .sf-popup .strip-tick { position: absolute; top: 12px; transform: translateX(-50%); font-size: 11px; line-height: 1; color: var(--muted); }
+  .sf-popup .strip-labels { display: flex; justify-content: space-between; margin-top: 4px; font-size: 11px; color: var(--muted); }
+  .sf-popup .strip-labels.below-ticks { margin-top: 16px; }
+  .sf-popup .strip-note { margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .sf-popup .strip.compact { margin: 6px 0 0; }
+  .sf-popup .strip.compact .strip-track { height: 5px; border-radius: 3px; }
+  .sf-popup .times { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 12px 0 4px; }
+  .sf-popup .field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
+  .sf-popup .field input { width: 100%; min-width: 0; padding: 6px; background: var(--sheet); border: 1px solid transparent; border-radius: 6px; color: var(--ink); font-size: 12px; }
+  .sf-popup .field input:focus { outline: none; border-color: var(--muted); }
+  .sf-popup input[type='time']::-webkit-calendar-picker-indicator { filter: invert(1); opacity: 0.4; }
+  .sf-popup .phase-list { margin-top: 10px; border-top: 1px solid var(--line); }
+  .sf-popup .phase-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto 58px 18px; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .sf-popup .swatch-wrap { position: relative; display: flex; }
+  .sf-popup .swatch { width: 12px; height: 12px; padding: 0; border: 0; border-radius: 3px; cursor: pointer; }
+  .sf-popup .swatch:disabled { cursor: default; }
+  .sf-popup .phase-name { min-width: 0; width: 100%; background: transparent; border: 0; font-weight: 600; padding: 0; }
+  .sf-popup .phase-name:focus { outline: none; text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 3px; }
+  .sf-popup .phase-range { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .sf-popup .phase-duration { width: 100%; padding: 4px 6px; background: var(--sheet); border: 1px solid transparent; border-radius: 6px; font-size: 12px; text-align: center; }
+  .sf-popup .phase-duration:focus { outline: none; border-color: var(--muted); }
+  .sf-popup .phase-duration:disabled { background: transparent; color: var(--muted); }
+  .sf-popup .icon-btn { background: none; border: 0; padding: 0; font-size: 16px; line-height: 1; color: var(--muted); cursor: pointer; }
+  .sf-popup .icon-btn:hover { color: var(--ink); }
+  .sf-popup .icon-btn:disabled { visibility: hidden; }
+  .sf-popup .phase-footer { display: flex; justify-content: space-between; padding: 8px 0 0; }
+  .sf-popup .color-picker { position: absolute; top: 18px; left: 0; z-index: 10; display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; padding: 8px; background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4); }
+  .sf-popup .color-option { width: 22px; height: 22px; padding: 0; border: 2px solid transparent; border-radius: 50%; cursor: pointer; }
+  .sf-popup .color-option.selected { border-color: var(--ink); }
+  .sf-popup .btn { padding: 10px 14px; border: 0; border-radius: 8px; font-weight: 600; cursor: pointer; }
+  .sf-popup .btn-primary { width: 100%; margin-top: 14px; background: var(--ink); color: var(--ground); }
+  .sf-popup .btn-primary:hover { background: #fff; }
+  .sf-popup .btn-primary:disabled { background: var(--sheet); color: var(--muted); cursor: default; }
+  .sf-popup .btn-secondary { background: var(--sheet); color: var(--ink); }
+  .sf-popup .btn-secondary:hover { background: var(--sheet-2); }
+  .sf-popup .actions { display: flex; gap: 8px; margin-top: 14px; }
+  .sf-popup .actions .btn { flex: 1; margin-top: 0; }
+  .sf-popup .library-group { margin-bottom: 18px; }
+  .sf-popup .group-title, .sf-popup .group-head { padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .sf-popup .group-title { font-size: 13px; font-weight: 600; letter-spacing: 0; }
+  .sf-popup .lib-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .sf-popup .lib-main { min-width: 0; }
+  .sf-popup .lib-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-popup .lib-sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sf-popup .lib-actions { display: flex; gap: 12px; }
+  .sf-popup .save-preset { display: flex; gap: 8px; margin-top: 10px; }
+  .sf-popup .save-preset input { flex: 1; min-width: 0; padding: 8px 10px; background: var(--sheet); border: 1px solid transparent; border-radius: 6px; }
+  .sf-popup .save-preset input:focus { outline: none; border-color: var(--muted); }
+  .sf-popup .save-preset input::placeholder { color: var(--muted); }
+
+  /* ---- the playlist page --------------------------------------------------------------- */
+
+  .sf-yt {
+    position: relative;
+    background: #030303;
+    color: #fff;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
+    font-family: Roboto, 'Helvetica Neue', system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.4;
+  }
+  .sf-yt .yt-nav { display: flex; align-items: center; gap: 24px; height: 56px; padding: 0 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+  .sf-yt .yt-logo { display: flex; align-items: center; gap: 6px; font-weight: 700; font-size: 17px; letter-spacing: -0.02em; }
+  .sf-yt .yt-dot { width: 22px; height: 22px; border-radius: 50%; background: #ff0033; box-shadow: inset 0 0 0 6px #fff, inset 0 0 0 8px #ff0033; }
+  .sf-yt .yt-search { flex: 1; max-width: 420px; margin-inline: auto; padding: 8px 14px; border-radius: 8px; background: rgba(255, 255, 255, 0.08); color: #8a8a8a; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sf-yt .yt-body { padding: 18px 20px 0; }
+  .sf-yt .yt-head { display: flex; gap: 20px; align-items: flex-end; margin-bottom: 8px; }
+  .sf-yt .yt-cover { flex: none; display: grid; grid-template-columns: 1fr 1fr; width: 128px; height: 128px; border-radius: 6px; overflow: hidden; background: #1a1a1a; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6); }
+  .sf-yt .yt-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .sf-yt .yt-kind { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: #aaa; }
+  .sf-yt .yt-title { font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; margin: 4px 0; }
+  .sf-yt .yt-meta { color: #aaa; font-size: 13px; }
+  .sf-yt .yt-buttons { display: flex; gap: 8px; margin-top: 12px; }
+  .sf-yt .yt-btn { padding: 8px 18px; border-radius: 18px; background: rgba(255, 255, 255, 0.1); font-size: 13px; font-weight: 500; }
+  .sf-yt .yt-btn.primary { background: #fff; color: #000; }
+
+  .sf-header { margin: 12px 0 10px; padding: 14px 16px 10px; background: rgba(255, 255, 255, 0.04); border-radius: 8px; }
+  .sf-header .plan-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; margin-bottom: 14px; }
+  .sf-header .plan-title { font-size: 15px; font-weight: 500; }
+  .sf-header .plan-meta { text-align: right; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .sf-header .plan-muted { color: #aaa; font-size: 12px; }
+  .sf-header .plan-track { position: relative; padding: 6px 0; cursor: crosshair; touch-action: none; }
+  .sf-header .plan-strip { position: relative; display: flex; gap: 1px; height: 8px; border-radius: 4px; overflow: hidden; transition: height 0.12s ease; }
+  .sf-header .plan-track:hover .plan-strip { height: 12px; border-radius: 6px; }
+  .sf-header .plan-strip > span { display: block; min-width: 2px; transition: flex 0.25s ease; }
+  .sf-header .plan-nomusic { position: absolute; top: 0; bottom: 0; right: 0; background: repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.55), rgba(0, 0, 0, 0.55) 3px, rgba(0, 0, 0, 0.25) 3px, rgba(0, 0, 0, 0.25) 6px); }
+  .sf-header .plan-cursor { display: none; position: absolute; top: 0; bottom: 0; width: 2px; background: #fff; transform: translateX(-1px); pointer-events: none; }
+  .sf-header .plan-tick { position: absolute; top: -12px; transform: translateX(-50%); font-size: 11px; line-height: 1; pointer-events: none; }
+  .sf-header .plan-legend { position: relative; height: 18px; margin-top: 4px; font-size: 12px; color: #aaa; font-variant-numeric: tabular-nums; }
+  .sf-header .plan-cell { position: absolute; top: 0; padding-right: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .sf-header .plan-cell b { font-weight: 500; color: #fff; }
+
+  .sf-yt .yt-rows { position: relative; max-height: 440px; overflow: hidden; padding-bottom: 24px; mask-image: linear-gradient(#000 88%, transparent); }
+  .sf-yt .row { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr) 140px auto; gap: 14px; align-items: center; min-height: 52px; padding: 6px 8px 6px 12px; border-radius: 4px; transition: background 0.3s ease; }
+  .sf-yt .row:hover { background: rgba(255, 255, 255, 0.06) !important; }
+  .sf-yt .row.scrub { outline: 1px solid rgba(255, 255, 255, 0.35); outline-offset: -1px; }
+  .sf-yt .row::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; border-radius: 4px 0 0 4px; background: var(--stripe, repeating-linear-gradient(-45deg, #555, #555 2px, #333 2px, #333 4px)); }
+  .sf-yt .thumb { display: block; width: 40px; height: 40px; border-radius: 3px; object-fit: cover; background: #1a1a1a; }
+  .sf-yt .tcol { display: flex; flex-direction: column; min-width: 0; }
+  .sf-yt .ttl { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sf-yt .sub, .sf-yt .alb { color: #aaa; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sf-yt .fixed { display: flex; align-items: center; justify-content: flex-end; gap: 12px; min-width: 60px; color: #aaa; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .sf-yt .cel-label { display: inline-flex; align-items: center; gap: 4px; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+  .sf-yt .cel-label[data-type='sunrise'] { background: linear-gradient(135deg, #ffd54f, #ff9800); color: #1a1a1a; animation: sf-sunrise-glow 2s ease-in-out infinite; }
+  .sf-yt .cel-label[data-type='sunset'] { background: linear-gradient(135deg, #5c6bc0, #3949ab); color: #fff; animation: sf-sunset-glow 2s ease-in-out infinite; }
+  .sf-yt .cel-ind { position: absolute; left: 0; transform: translate(-50%, -50%); z-index: 2; font-size: 14px; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6)); }
+  @keyframes sf-sunrise-glow { 0%, 100% { box-shadow: 0 0 4px rgba(255, 152, 0, 0.4); } 50% { box-shadow: 0 0 16px rgba(255, 152, 0, 0.7); } }
+  @keyframes sf-sunset-glow { 0%, 100% { box-shadow: 0 0 4px rgba(92, 107, 192, 0.4); } 50% { box-shadow: 0 0 16px rgba(92, 107, 192, 0.7); } }
+  @media (max-width: 640px) {
+    .sf-yt .row { grid-template-columns: 40px minmax(0, 1fr) auto; }
+    .sf-yt .alb, .sf-yt .yt-search { display: none; }
+    .sf-yt .yt-cover { width: 88px; height: 88px; }
+    .sf-yt .yt-title { font-size: 22px; }
+  }
+
+  .sf-popover { position: absolute; top: 0; left: 0; z-index: 5; min-width: 200px; max-width: 280px; padding: 12px 14px; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.05); pointer-events: none; will-change: transform; }
+  .sf-popover .pop-time { font-size: 20px; font-weight: 600; margin-bottom: 8px; letter-spacing: -0.5px; }
+  .sf-popover .pop-day { font-size: 12px; color: #888; font-weight: 400; margin-left: 4px; }
+  .sf-popover .pop-phase { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: rgba(255, 255, 255, 0.05); border-radius: 8px; margin-bottom: 8px; }
+  .sf-popover .pop-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+  .sf-popover .pop-name { font-size: 13px; font-weight: 600; }
+  .sf-popover .pop-range { font-size: 11px; color: #888; margin-left: auto; white-space: nowrap; }
+  .sf-popover .pop-track { font-size: 13px; margin-bottom: 4px; }
+  .sf-popover .pop-pos { font-size: 13px; font-weight: 500; color: #aaa; font-variant-numeric: tabular-nums; }
+  .sf-popover .pop-cel { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; padding: 6px 10px; border-radius: 6px; margin-top: 8px; }
+  .sf-popover .pop-cel.sunrise { background: linear-gradient(135deg, rgba(255, 213, 79, 0.2), rgba(255, 152, 0, 0.1)); color: #ffd54f; }
+  .sf-popover .pop-cel.sunset { background: linear-gradient(135deg, rgba(92, 107, 192, 0.2), rgba(57, 73, 171, 0.1)); color: #7986cb; }
+  .sf-popover .pop-cel.past { opacity: 0.6; }
+</style>

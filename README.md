@@ -73,6 +73,23 @@ pnpm build
 pnpm typecheck
 ```
 
+## Publishing to the Chrome Web Store
+
+Pushing a `v*` tag builds the zip and creates the GitHub release. When the secrets below exist,
+the same run uploads that zip to the Chrome Web Store and submits it for review.
+
+One-time setup:
+
+1. In the [Developer Dashboard](https://chrome.google.com/webstore/devconsole), create the item by
+   uploading `setflow-extension.zip` from a release by hand, fill in the listing and privacy tabs,
+   and submit it. Note the item ID from its URL and the publisher ID from the account page.
+2. Run `npx chrome-webstore-upload-keys` locally and follow it: it creates the Google Cloud
+   project, enables the Chrome Web Store API, and prints a client ID, client secret and refresh token.
+3. Add repository secrets: `CWS_EXTENSION_ID`, `CWS_PUBLISHER_ID`, `CWS_CLIENT_ID`,
+   `CWS_CLIENT_SECRET`, `CWS_REFRESH_TOKEN`.
+
+Every later tag ships to both places. The Web Store version goes live once Google's review passes.
+
 ## Tech Stack
 
 - React + TypeScript
