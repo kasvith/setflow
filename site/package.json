@@ -5,9 +5,13 @@
   "scripts": {
     "dev": "astro dev",
     "build": "astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
     "astro": "^7.3.1"
+  },
+  "devDependencies": {
+    "wrangler": "^4.129.1"
   }
 }
