@@ -28,7 +28,6 @@ import {
   timeInputToTimestamp,
   formatDurationCompact,
   formatClock,
-  phaseWindows,
   resolveStartTimestamp,
 } from '../shared/utils'
 import PhaseEditor from './components/PhaseEditor'
@@ -62,7 +61,6 @@ export default function App() {
   const [journeys, setJourneys] = useState<SavedJourney[]>([])
   const [isOnYouTubeMusic, setIsOnYouTubeMusic] = useState<boolean | null>(null)
   const [page, setPage] = useState<PageInfo>({ url: null, title: null })
-  const [now, setNow] = useState(Date.now())
 
   const [startTime, setStartTime] = useState('')
   const [sunriseTime, setSunriseTime] = useState('')
@@ -147,13 +145,6 @@ export default function App() {
     chrome.runtime.onMessage.addListener(handleMessage)
     return () => chrome.runtime.onMessage.removeListener(handleMessage)
   }, [loadForm])
-
-  // Live clock for the strip cursor and countdown while a journey runs
-  useEffect(() => {
-    if (!activeSession) return
-    const id = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(id)
-  }, [activeSession])
 
   // Auto-save the draft (debounced), tied to the playlist it was written on
   useEffect(() => {
@@ -368,16 +359,6 @@ export default function App() {
       ? timeInputToTimestamp(sunsetTime, start)
       : undefined
 
-  let status = ''
-  if (activeSession) {
-    const current = phaseWindows(activeSession.phases, start).find(
-      (w) => now >= w.start && now < w.end
-    )
-    if (now < start) status = `Starts in ${formatDurationCompact(Math.ceil((start - now) / 60000))}`
-    else if (current)
-      status = `${current.phase.name}, ${formatDurationCompact(Math.ceil((current.end - now) / 60000))} left`
-    else status = 'Journey complete'
-  }
   const wrongPlaylist =
     !!activeSession?.playlistUrl && !!page.url && activeSession.playlistUrl !== page.url
 
@@ -393,10 +374,9 @@ export default function App() {
       {activeSession ? (
         <>
           <div className="journey-head">
-            <span className="live-dot" aria-hidden="true" />
             <h2 className="journey-title">{activeSession.journeyName || 'Journey'}</h2>
             <button type="button" className="link" onClick={handleEnd}>
-              End journey
+              End planning
             </button>
           </div>
           {wrongPlaylist ? (
@@ -411,13 +391,9 @@ export default function App() {
               </button>
             </div>
           ) : (
-            <p className="subline">Tracks on the playlist are marked by phase.</p>
+            <p className="subline">Planning this playlist. Its tracks are marked by phase.</p>
           )}
-          <JourneyStrip phases={activeSession.phases} start={start} sunrise={sunrise} sunset={sunset} now={now} />
-          <div className="countdown">
-            <span>{status}</span>
-            <span className="clock">{formatClock(now)}</span>
-          </div>
+          <JourneyStrip phases={activeSession.phases} start={start} sunrise={sunrise} sunset={sunset} />
           <PhaseEditor
             phases={activeSession.phases}
             disabled
@@ -484,7 +460,7 @@ export default function App() {
             disabled={phases.length === 0}
             onClick={handleStart}
           >
-            Start journey
+            Start planning
           </button>
         </>
       )}

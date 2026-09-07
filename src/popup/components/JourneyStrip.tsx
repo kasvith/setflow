@@ -6,13 +6,12 @@ interface Props {
   start: number // timestamp
   sunrise?: number
   sunset?: number
-  now?: number // draws the cursor and dims what's ahead
   compact?: boolean // no clock labels, thinner track (library rows)
 }
 
-// The journey as one bar: phase widths in proportion to duration, celestial ticks and the
-// current moment placed at their real positions
-export default function JourneyStrip({ phases, start, sunrise, sunset, now, compact }: Props) {
+// The journey as one bar: phase widths in proportion to duration, celestial ticks at their
+// real positions
+export default function JourneyStrip({ phases, start, sunrise, sunset, compact }: Props) {
   const total = phases.reduce((sum, p) => sum + p.duration, 0) * 60 * 1000
   const end = start + total
   const pct = (t: number) => `${Math.min(100, Math.max(0, ((t - start) / total) * 100))}%`
@@ -25,9 +24,7 @@ export default function JourneyStrip({ phases, start, sunrise, sunset, now, comp
         {phases.map((p) => (
           <span key={p.id} style={{ flex: p.duration, background: p.color }} title={p.name} />
         ))}
-        {inside(now) && <span className="strip-future" style={{ left: pct(now) }} />}
       </div>
-      {inside(now) && <span className="strip-now" style={{ left: pct(now) }} />}
       {inside(sunrise) && (
         <span className="strip-tick" style={{ left: pct(sunrise) }} title={`Sunrise ${formatClock(sunrise)}`}>
           ☀

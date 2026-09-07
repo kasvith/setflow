@@ -11,7 +11,6 @@
   --line: rgba(255, 255, 255, 0.08);
   --ink: #eceaf4;
   --ink-muted: #8f8ea4;
-  --live: #4caf50;
   --danger: #ff8a80;
 }
 
@@ -121,15 +120,6 @@ input {
   white-space: nowrap;
 }
 
-.live-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--live);
-  animation: pulse 2s ease-in-out infinite;
-  flex-shrink: 0;
-}
-
 .subline {
   color: var(--ink-muted);
   font-size: 12px;
@@ -168,23 +158,6 @@ input {
   min-width: 2px;
 }
 
-.strip-future {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  right: 0;
-  background: rgba(18, 19, 32, 0.6);
-}
-
-.strip-now {
-  position: absolute;
-  top: -3px;
-  width: 2px;
-  height: 16px;
-  background: var(--ink);
-  transform: translateX(-1px);
-}
-
 .strip-tick {
   position: absolute;
   top: 12px;
@@ -215,28 +188,12 @@ input {
   border-radius: 3px;
 }
 
-/* Live status */
-.countdown {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  margin: 12px 0 12px;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-.countdown .clock {
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--ink-muted);
-}
-
 /* Time fields */
 .times {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  margin: 12px 0 14px;
+  margin: 12px 0 4px;
 }
 
 .field {
@@ -269,6 +226,7 @@ input[type='time']::-webkit-calendar-picker-indicator {
 
 /* Phase rows */
 .phase-list {
+  margin-top: 10px;
   border-top: 1px solid var(--line);
 }
 
@@ -533,20 +491,4 @@ input[type='time']::-webkit-calendar-picker-indicator {
   padding: 32px 0;
   text-align: center;
   color: var(--ink-muted);
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.4;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .live-dot {
-    animation: none;
-  }
 }

@@ -70,7 +70,7 @@ export default function Library({
       <section className="library-group">
         <h3 className="group-title">Journeys</h3>
         {sortedJourneys.length === 0 && (
-          <p className="empty">No saved journeys yet. Start one on a playlist and it's kept here.</p>
+          <p className="empty">No saved journeys yet. Start planning on a playlist and it's kept here.</p>
         )}
         {sortedJourneys.map((journey) => (
           <div key={journey.playlistUrl} className="lib-row">
