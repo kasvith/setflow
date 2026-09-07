@@ -164,7 +164,12 @@ export default function App() {
   }, [startTime, sunriseTime, sunsetTime, phases, journeyName, page.url, activeSession])
 
   async function handleStart() {
-    const name = journeyName.trim() || page.title || 'Journey'
+    let title = page.title
+    if (!journeyName.trim() && !title && tabId.current) {
+      const info = await sendMessageToContentScript<PageInfo>(tabId.current, { type: 'GET_PLAYLIST_URL' })
+      title = info?.title ?? null
+    }
+    const name = journeyName.trim() || title || 'Journey'
     const start = resolveStartTimestamp(startTime, totalMinutes(phases))
     const session: Session = {
       startTime: start,
@@ -190,7 +195,7 @@ export default function App() {
       await saveJourney({
         name,
         playlistUrl: page.url,
-        playlistTitle: page.title || undefined,
+        playlistTitle: title || undefined,
         phases: phases.map((p) => ({ ...p })),
         startTime: startTime || undefined,
         sunriseTime: sunriseTime || undefined,
@@ -359,8 +364,26 @@ export default function App() {
       ? timeInputToTimestamp(sunsetTime, start)
       : undefined
 
-  const wrongPlaylist =
-    !!activeSession?.playlistUrl && !!page.url && activeSession.playlistUrl !== page.url
+  // The plan can't show a sunrise or sunset that falls outside it; say where it is instead
+  const end = start + totalMinutes(activeSession ? activeSession.phases : phases) * 60 * 1000
+  const outsideNotes = (
+    [
+      ['☀ Sunrise', sunrise],
+      ['☾ Sunset', sunset],
+    ] as [string, number | undefined][]
+  )
+    .filter(([, t]) => t !== undefined && (t < start || t >= end))
+    .map(([label, t]) =>
+      t! < start
+        ? `${label} ${formatClock(t!)} is ${formatDurationCompact(Math.round((start - t!) / 60000))} before the plan starts`
+        : `${label} ${formatClock(t!)} is ${formatDurationCompact(Math.round((t! - end) / 60000))} after it ends`
+    )
+  const notes = outsideNotes.map((text) => (
+    <p key={text} className="strip-note">
+      {text}
+    </p>
+  ))
+  const awayFromPlaylist = !!activeSession?.playlistUrl && activeSession.playlistUrl !== page.url
 
   return (
     <div className="app">
@@ -375,13 +398,10 @@ export default function App() {
         <>
           <div className="journey-head">
             <h2 className="journey-title">{activeSession.journeyName || 'Journey'}</h2>
-            <button type="button" className="link" onClick={handleEnd}>
-              End planning
-            </button>
           </div>
-          {wrongPlaylist ? (
+          {awayFromPlaylist ? (
             <div className="notice">
-              <span>This isn't the journey's playlist.</span>
+              <span>{page.url ? "This isn't the journey's playlist." : 'The journey\'s playlist is elsewhere.'}</span>
               <button
                 type="button"
                 className="link"
@@ -394,6 +414,7 @@ export default function App() {
             <p className="subline">Planning this playlist. Its tracks are marked by phase.</p>
           )}
           <JourneyStrip phases={activeSession.phases} start={start} sunrise={sunrise} sunset={sunset} />
+          {notes}
           <PhaseEditor
             phases={activeSession.phases}
             disabled
@@ -408,6 +429,9 @@ export default function App() {
           <div className="actions">
             <button type="button" className="btn btn-secondary" onClick={handleExport}>
               Export JSON
+            </button>
+            <button type="button" className="btn btn-primary" onClick={handleEnd}>
+              End planning
             </button>
           </div>
         </>
@@ -427,6 +451,7 @@ export default function App() {
             {page.url ? 'Linked to this playlist' : 'Open a playlist to link this journey to it'}
           </p>
           <JourneyStrip phases={phases} start={start} sunrise={sunrise} sunset={sunset} />
+          {notes}
           <div className="times">
             <label className="field">
               Start

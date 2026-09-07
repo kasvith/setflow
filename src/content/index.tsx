@@ -4,7 +4,6 @@ import { getPhaseAtTime, getPhasesInRange } from '../shared/utils'
 
 let session: Session | null = null
 let popover: HTMLElement | null = null
-let labelIntervalId: number | null = null
 let debounceTimeout: number | null = null
 let hoverFrame = 0
 // Per-row hover data; dies with the row instead of round-tripping through JSON attributes
@@ -185,14 +184,6 @@ function formatTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 }
 
-function formatDuration(minutes: number): string {
-  const h = Math.floor(minutes / 60)
-  const m = Math.floor(minutes % 60)
-  if (h > 0 && m > 0) return `${h}h ${m}m`
-  if (h > 0) return `${h}h`
-  return `${m}m`
-}
-
 function formatTimeWithSeconds(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString([], {
     hour: 'numeric',
@@ -345,10 +336,6 @@ let observer: MutationObserver | null = null
 
 // Cleanup function to prevent memory leaks
 function cleanup() {
-  if (labelIntervalId) {
-    clearInterval(labelIntervalId)
-    labelIntervalId = null
-  }
   if (debounceTimeout) {
     clearTimeout(debounceTimeout)
     debounceTimeout = null
@@ -374,14 +361,6 @@ async function init() {
       session = data.activeSession
       sync()
     })
-
-    // Only the phase header is time-based; track labels depend on playlist position alone
-    if (labelIntervalId) clearInterval(labelIntervalId)
-    labelIntervalId = setInterval(() => {
-      if (!isTracking() || !isExtensionContextValid()) return
-      addPhaseHeader()
-      observer?.takeRecords()
-    }, 10000)
   } catch {
     // Extension context may have been invalidated
   }
@@ -624,73 +603,48 @@ function removeCelestialLabel(item: Element) {
   }
 }
 
+// A static summary of the plan above the tracklist: name, phase strip, start to end
 function addPhaseHeader() {
   if (!session) return
 
-  const elapsedMinutes = (Date.now() - session.startTime) / (1000 * 60)
-  const currentPhase = getPhaseAtTime(session, elapsedMinutes)
-
-  // Find the playlist header area
-  const headerArea = document.querySelector('ytmusic-detail-header-renderer, ytmusic-playlist-shelf-renderer #header')
+  const headerArea = document.querySelector(
+    'ytmusic-detail-header-renderer, ytmusic-playlist-shelf-renderer #header'
+  )
   if (!headerArea) return
 
-  let phaseHeader = document.querySelector('.setflow-phase-header') as HTMLElement | null
-
-  if (!phaseHeader) {
-    phaseHeader = document.createElement('div')
-    phaseHeader.className = 'setflow-phase-header'
-    headerArea.insertBefore(phaseHeader, headerArea.firstChild)
+  let header = document.querySelector('.setflow-phase-header') as HTMLElement | null
+  if (!header) {
+    header = document.createElement('div')
+    header.className = 'setflow-phase-header'
+    headerArea.insertBefore(header, headerArea.firstChild)
   }
 
-  if (currentPhase) {
-    const timeRange = getPhaseTimeRange(session, currentPhase)
-    const remaining = Math.ceil(currentPhase.duration - (elapsedMinutes - getPhaseStartTime(session, currentPhase.name)))
+  // Only rebuild when the plan changed; every rebuild is a DOM mutation the observer sees
+  const key = JSON.stringify([session.startTime, session.journeyName, session.phases])
+  if (header.dataset.key === key) return
+  header.dataset.key = key
+  header.replaceChildren()
 
-    phaseHeader.style.display = 'block'
-    phaseHeader.innerHTML = `
-      <div style="
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 12px 16px;
-        margin: 8px 0 16px 0;
-        background: ${currentPhase.color}22;
-        border-left: 4px solid ${currentPhase.color};
-        border-radius: 0 8px 8px 0;
-        font-family: 'YouTube Sans', sans-serif;
-      ">
-        <div style="
-          width: 8px;
-          height: 8px;
-          background: ${currentPhase.color};
-          border-radius: 50%;
-          animation: pulse 2s infinite;
-        "></div>
-        <div>
-          <div style="font-size: 14px; font-weight: 500; color: ${currentPhase.color};">
-            ${currentPhase.name}
-          </div>
-          <div style="font-size: 12px; color: #aaa;">
-            ${timeRange.start} – ${timeRange.end} · ${formatDuration(remaining)} remaining
-          </div>
-        </div>
-      </div>
-    `
-  } else {
-    // Journey complete - hide the header
-    phaseHeader.style.display = 'none'
-  }
-}
+  const title = document.createElement('div')
+  title.className = 'setflow-plan-title'
+  title.textContent = session.journeyName || 'Setflow plan'
 
-function getPhaseStartTime(session: Session, phaseName: string): number {
-  let accumulatedTime = 0
+  const strip = document.createElement('div')
+  strip.className = 'setflow-plan-strip'
   for (const phase of session.phases) {
-    if (phase.name === phaseName) {
-      return accumulatedTime
-    }
-    accumulatedTime += phase.duration
+    const seg = document.createElement('span')
+    seg.style.flex = String(phase.duration)
+    seg.style.background = phase.color
+    seg.title = phase.name
+    strip.appendChild(seg)
   }
-  return 0
+
+  const totalMinutes = session.phases.reduce((sum, p) => sum + p.duration, 0)
+  const times = document.createElement('div')
+  times.className = 'setflow-plan-times'
+  times.textContent = `${formatTime(session.startTime)} to ${formatTime(session.startTime + totalMinutes * 60 * 1000)}`
+
+  header.append(title, strip, times)
 }
 
 // Add CSS for phase indicators and celestial labels
@@ -699,9 +653,37 @@ if (!document.getElementById('setflow-styles')) {
 const style = document.createElement('style')
 style.id = 'setflow-styles'
 style.textContent = `
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
+  .setflow-phase-header {
+    margin: 8px 0 16px;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 8px;
+    font-family: 'YouTube Sans', sans-serif;
+  }
+
+  .setflow-plan-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: #fff;
+    margin-bottom: 8px;
+  }
+
+  .setflow-plan-strip {
+    display: flex;
+    gap: 1px;
+    height: 6px;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .setflow-plan-strip span {
+    display: block;
+  }
+
+  .setflow-plan-times {
+    font-size: 12px;
+    color: #aaa;
+    margin-top: 6px;
   }
 
   [data-setflow-phase] {

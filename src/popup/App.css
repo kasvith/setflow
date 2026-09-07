@@ -179,6 +179,12 @@ input {
   margin-top: 16px;
 }
 
+.strip-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
 .strip.compact {
   margin: 6px 0 0;
 }
@@ -394,6 +400,7 @@ input[type='time']::-webkit-calendar-picker-indicator {
 
 .actions .btn {
   flex: 1;
+  margin-top: 0;
 }
 
 /* Library */
