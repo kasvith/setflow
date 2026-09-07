@@ -63,6 +63,23 @@ navigation?.addEventListener('currententrychange', () => {
   setTimeout(notifyUrlChange, 1000)
 })
 
+// One instance owns the page. After an extension reload the previous content script is
+// orphaned (its chrome.runtime is gone) and the background injects a fresh one. The newcomer
+// announces itself on the document, which every world can hear, and older copies let go.
+const TAKEOVER_EVENT = 'setflow-takeover'
+let retired = false
+document.dispatchEvent(new Event(TAKEOVER_EVENT))
+document.addEventListener(TAKEOVER_EVENT, () => {
+  retired = true
+  session = null
+  stopObserver()
+  removeLabels()
+  // Rows keep their listeners (they no-op now); let the new instance bind its own
+  for (const row of document.querySelectorAll('[data-setflow-bound]')) {
+    row.removeAttribute('data-setflow-bound')
+  }
+})
+
 // Format time from session start minutes
 function formatTimeFromMinutes(session: Session | null, minutes: number): string {
   if (!session) return ''
@@ -247,8 +264,8 @@ function createPopover(): HTMLElement {
 }
 
 function showPopover(target: HTMLElement, info: TrackInfo, mouseY: number) {
-  if (!popover) popover = createPopover()
   if (!session) return
+  if (!popover) popover = createPopover()
 
   // Calculate position ratio based on mouseY within target
   const rect = target.getBoundingClientRect()
@@ -372,6 +389,7 @@ async function init() {
 
 // Reconcile the page with the session: label + observe on the tracked playlist, clear elsewhere
 function sync() {
+  if (retired || !isExtensionContextValid()) return
   if (isTracking()) {
     startObserver()
   } else {
@@ -451,7 +469,7 @@ function parseDurationToMinutes(duration: string): number {
 }
 
 function labelTracks() {
-  if (!session || !isTracking()) return
+  if (retired || !session || !isTracking()) return
 
   // Calculate celestial moments (minutes from journey start)
   const sunriseMinutes = session.sunriseTimestamp

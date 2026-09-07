@@ -3,7 +3,14 @@
   "name": "Setflow",
   "description": "Track your journey phases on YouTube Music",
   "version": "0.0.7",
-  "permissions": ["storage", "activeTab"],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "*://music.youtube.com/*"
+  ],
   "action": {
     "default_popup": "src/popup/index.html",
     "default_title": "Setflow",
@@ -20,9 +27,15 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://music.youtube.com/*"],
-      "js": ["src/content/index.tsx"],
-      "css": ["content.css"]
+      "matches": [
+        "*://music.youtube.com/*"
+      ],
+      "js": [
+        "src/content/index.tsx"
+      ],
+      "css": [
+        "content.css"
+      ]
     }
   ],
   "background": {

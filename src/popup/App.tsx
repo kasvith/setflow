@@ -50,6 +50,27 @@ function sendMessageToContentScript<T>(tabId: number, message: object): Promise<
   })
 }
 
+// Ask the content script for the page; if nothing answers, the tab predates this version of the
+// extension, so inject the script (activeTab allows it) and ask again once it has loaded
+async function getPageInfo(tabId: number): Promise<PageInfo | null> {
+  const ask = () => sendMessageToContentScript<PageInfo>(tabId, { type: 'GET_PLAYLIST_URL' })
+  const first = await ask()
+  if (first) return first
+  const { js = [], css = [] } = chrome.runtime.getManifest().content_scripts?.[0] ?? {}
+  try {
+    if (css.length) await chrome.scripting.insertCSS({ target: { tabId }, files: css })
+    await chrome.scripting.executeScript({ target: { tabId }, files: js })
+  } catch {
+    return null
+  }
+  for (let attempt = 0; attempt < 10; attempt++) {
+    await new Promise((r) => setTimeout(r, 150))
+    const info = await ask()
+    if (info) return info
+  }
+  return null
+}
+
 const freshIds = (phases: Phase[]) => phases.map((p) => ({ ...p, id: generateId() }))
 const totalMinutes = (phases: Phase[]) => phases.reduce((sum, p) => sum + p.duration, 0)
 
@@ -119,9 +140,7 @@ export default function App() {
         return
       }
 
-      const info = tab?.id
-        ? await sendMessageToContentScript<PageInfo>(tab.id, { type: 'GET_PLAYLIST_URL' })
-        : null
+      const info = tab?.id ? await getPageInfo(tab.id) : null
       const current = { url: info?.url ?? null, title: info?.title ?? null }
       setPage(current)
 
