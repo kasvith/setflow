@@ -8,8 +8,7 @@ A Chrome extension for YouTube Music that helps you visualize and track journey 
 - **Visual Indicators**: Tracks are highlighted with phase colors on YouTube Music playlists
 - **Time Simulation**: Hover over tracks to see simulated time progression
 - **Celestial Events**: Mark sunrise/sunset times with countdown indicators
-- **Presets**: Save and load phase configurations
-- **Duration Presets**: Quick 8h or 12h journey templates
+- **Library**: Journeys are saved per playlist and reopened from the library; phase presets live alongside them
 
 ## Installation
 
@@ -52,7 +51,7 @@ A Chrome extension for YouTube Music that helps you visualize and track journey 
 1. Click the Setflow extension icon in Chrome
 2. Configure your journey:
    - Set a start time (optional, defaults to now)
-   - Choose a duration preset (8h, 12h) or customize phases
+   - Customize phases or pick a preset from the library
    - Add sunrise/sunset times if desired
 3. Click "Start Planning"
 4. Open a playlist on YouTube Music - tracks will be highlighted with phase colors

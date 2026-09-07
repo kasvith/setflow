@@ -1,5 +1,13 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { Phase, Session, Preset, DEFAULT_PHASES, DEFAULT_PRESETS, ExportedTracklist } from '../shared/types'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import {
+  Phase,
+  Session,
+  Preset,
+  SavedJourney,
+  DEFAULT_PHASES,
+  DEFAULT_PRESETS,
+  ExportedTracklist,
+} from '../shared/types'
 import {
   getActiveSession,
   setActiveSession,
@@ -12,305 +20,269 @@ import {
   clearDraftFormState,
   getSavedJourney,
   saveJourney,
+  deleteJourney,
+  listJourneys,
 } from '../shared/storage'
-import { generateId, timeInputToTimestamp, formatDurationCompact } from '../shared/utils'
+import {
+  generateId,
+  timeInputToTimestamp,
+  formatDurationCompact,
+  formatClock,
+  resolveStartTimestamp,
+} from '../shared/utils'
 import PhaseEditor from './components/PhaseEditor'
-import PresetManager from './components/PresetManager'
+import Library from './components/Library'
+import JourneyStrip from './components/JourneyStrip'
 
-type Tab = 'session' | 'presets'
-type DurationPreset = '2h' | '4h' | '6h' | '8h' | '12h' | 'custom'
+type Screen = 'plan' | 'library'
 
-// Helper to safely send message to content script (handles "Receiving end does not exist" error)
+interface PageInfo {
+  url: string | null // canonical playlist URL, null off a playlist
+  title: string | null
+}
+
+// Handles "Receiving end does not exist" when the content script isn't on the page
 function sendMessageToContentScript<T>(tabId: number, message: object): Promise<T | null> {
   return new Promise((resolve) => {
     chrome.tabs.sendMessage(tabId, message, (response) => {
-      if (chrome.runtime.lastError) {
-        // Content script not available (e.g., not on YouTube Music)
-        resolve(null)
-      } else {
-        resolve(response as T)
-      }
+      resolve(chrome.runtime.lastError ? null : (response as T))
     })
   })
 }
 
+// Ask the content script for the page; if nothing answers, the tab predates this version of the
+// extension, so inject the script (activeTab allows it) and ask again once it has loaded
+async function getPageInfo(tabId: number): Promise<PageInfo | null> {
+  const ask = () => sendMessageToContentScript<PageInfo>(tabId, { type: 'GET_PLAYLIST_URL' })
+  const first = await ask()
+  if (first) return first
+  const { js = [], css = [] } = chrome.runtime.getManifest().content_scripts?.[0] ?? {}
+  try {
+    if (css.length) await chrome.scripting.insertCSS({ target: { tabId }, files: css })
+    await chrome.scripting.executeScript({ target: { tabId }, files: js })
+  } catch {
+    return null
+  }
+  for (let attempt = 0; attempt < 10; attempt++) {
+    await new Promise((r) => setTimeout(r, 150))
+    const info = await ask()
+    if (info) return info
+  }
+  return null
+}
+
+const freshIds = (phases: Phase[]) => phases.map((p) => ({ ...p, id: generateId() }))
+const totalMinutes = (phases: Phase[]) => phases.reduce((sum, p) => sum + p.duration, 0)
+
 export default function App() {
-  const [tab, setTab] = useState<Tab>('session')
+  const [screen, setScreen] = useState<Screen>('plan')
   const [phases, setPhases] = useState<Phase[]>(DEFAULT_PHASES)
   const [activeSession, setActiveSessionState] = useState<Session | null>(null)
   const [presets, setPresets] = useState<Preset[]>([])
+  const [journeys, setJourneys] = useState<SavedJourney[]>([])
   const [isOnYouTubeMusic, setIsOnYouTubeMusic] = useState<boolean | null>(null)
+  const [page, setPage] = useState<PageInfo>({ url: null, title: null })
 
-  // Journey settings state
-  const [startTime, setStartTime] = useState<string>('')
-  const [sunriseTime, setSunriseTime] = useState<string>('')
-  const [sunsetTime, setSunsetTime] = useState<string>('')
-  const [durationPreset, setDurationPreset] = useState<DurationPreset>('12h')
-  const [journeyName, setJourneyName] = useState<string>('')
-  const [currentPlaylistUrl, setCurrentPlaylistUrl] = useState<string | null>(null)
+  const [startTime, setStartTime] = useState('')
+  const [sunriseTime, setSunriseTime] = useState('')
+  const [sunsetTime, setSunsetTime] = useState('')
+  const [journeyName, setJourneyName] = useState('')
+
+  const tabId = useRef<number | undefined>(undefined)
   const isInitialLoad = useRef(true)
+  // Mirror for the message listener, which is registered once
+  const sessionRef = useRef<Session | null>(null)
+  useEffect(() => {
+    sessionRef.current = activeSession
+  }, [activeSession])
 
-  // Handle playlist URL changes
-  const handlePlaylistUrlChange = useCallback(async (newUrl: string | null) => {
-    if (newUrl === currentPlaylistUrl) return
-    setCurrentPlaylistUrl(newUrl)
-
-    // Don't change anything if there's an active session
-    if (activeSession) return
-
-    if (newUrl) {
-      // Check for saved journey for this URL
-      const savedJourney = await getSavedJourney(newUrl)
-      if (savedJourney) {
-        setJourneyName(savedJourney.name)
-        setPhases(savedJourney.phases.map(p => ({ ...p, id: generateId() })))
-        if (savedJourney.startTime) setStartTime(savedJourney.startTime)
-        if (savedJourney.sunriseTime) setSunriseTime(savedJourney.sunriseTime)
-        if (savedJourney.sunsetTime) setSunsetTime(savedJourney.sunsetTime)
-        return
-      }
+  // Form for a playlist: its saved journey, else this playlist's draft, else defaults
+  const loadForm = useCallback(async (info: PageInfo) => {
+    const saved = info.url ? await getSavedJourney(info.url) : null
+    if (saved) {
+      setJourneyName(saved.name)
+      setPhases(freshIds(saved.phases))
+      setStartTime(saved.startTime || '')
+      setSunriseTime(saved.sunriseTime || '')
+      setSunsetTime(saved.sunsetTime || '')
+      return
     }
-
-    // No saved journey - reset to defaults
-    setJourneyName('')
-    setPhases(DEFAULT_PHASES.map(p => ({ ...p, id: generateId() })))
+    const draft = await getDraftFormState()
+    if (draft && (draft.playlistUrl ?? null) === info.url) {
+      setJourneyName(draft.journeyName || info.title || '')
+      setPhases(draft.phases?.length > 0 ? draft.phases : freshIds(DEFAULT_PHASES))
+      setStartTime(draft.startTime || '')
+      setSunriseTime(draft.sunriseTime || '')
+      setSunsetTime(draft.sunsetTime || '')
+      return
+    }
+    setJourneyName(info.title || '')
+    setPhases(freshIds(DEFAULT_PHASES))
     setStartTime('')
     setSunriseTime('')
     setSunsetTime('')
-  }, [currentPlaylistUrl, activeSession])
+  }, [])
 
   useEffect(() => {
-    // Load initial data from storage
     async function loadData() {
-      const [session, loadedPresets, draft] = await Promise.all([
+      const [session, loadedPresets, loadedJourneys] = await Promise.all([
         getActiveSession(),
         getPresets(),
-        getDraftFormState(),
+        listJourneys(),
       ])
       setActiveSessionState(session)
       setPresets(loadedPresets)
+      setJourneys(loadedJourneys)
 
-      // Check if we're on YouTube Music
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-      const currentUrl = tabs[0]?.url || ''
-      const onYTMusic = currentUrl.startsWith('https://music.youtube.com/')
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      tabId.current = tab?.id
+      const onYTMusic = (tab?.url || '').startsWith('https://music.youtube.com/')
       setIsOnYouTubeMusic(onYTMusic)
-
       if (!onYTMusic) {
         isInitialLoad.current = false
         return
       }
 
-      // Try to get playlist URL from content script
-      if (tabs[0]?.id) {
-        const response = await sendMessageToContentScript<{ url: string | null }>(
-          tabs[0].id,
-          { type: 'GET_PLAYLIST_URL' }
-        )
-        if (response?.url) {
-          setCurrentPlaylistUrl(response.url)
-          // Check for saved journey
-          const savedJourney = await getSavedJourney(response.url)
-          if (savedJourney && !session) {
-            setJourneyName(savedJourney.name)
-            setPhases(savedJourney.phases.map(p => ({ ...p, id: generateId() })))
-            if (savedJourney.startTime) setStartTime(savedJourney.startTime)
-            if (savedJourney.sunriseTime) setSunriseTime(savedJourney.sunriseTime)
-            if (savedJourney.sunsetTime) setSunsetTime(savedJourney.sunsetTime)
-            if (savedJourney.durationPreset) setDurationPreset(savedJourney.durationPreset as DurationPreset)
-            isInitialLoad.current = false
-            return
-          }
-        }
-      }
+      const info = tab?.id ? await getPageInfo(tab.id) : null
+      const current = { url: info?.url ?? null, title: info?.title ?? null }
+      setPage(current)
 
       if (session) {
         setPhases(session.phases)
-        if (session.journeyName) setJourneyName(session.journeyName)
-      } else if (draft) {
-        // Restore draft state if no active session
-        setStartTime(draft.startTime || '')
-        setSunriseTime(draft.sunriseTime || '')
-        setSunsetTime(draft.sunsetTime || '')
-        setDurationPreset((draft.durationPreset as DurationPreset) || '12h')
-        setPhases(draft.phases?.length > 0 ? draft.phases : DEFAULT_PHASES)
-        setJourneyName(draft.journeyName || '')
+        setJourneyName(session.journeyName || '')
+      } else {
+        await loadForm(current)
       }
-
       isInitialLoad.current = false
     }
 
     loadData()
 
-    // Listen for URL changes from content script
-    const handleMessage = (message: { type: string; url: string | null }) => {
-      if (message.type === 'URL_CHANGED') {
-        handlePlaylistUrlChange(message.url)
-      }
+    const handleMessage = (message: { type: string; url: string | null; title: string | null }) => {
+      if (message.type !== 'URL_CHANGED') return
+      const current = { url: message.url, title: message.title }
+      setPage(current)
+      if (!sessionRef.current) loadForm(current)
     }
     chrome.runtime.onMessage.addListener(handleMessage)
     return () => chrome.runtime.onMessage.removeListener(handleMessage)
-  }, [handlePlaylistUrlChange])
+  }, [loadForm])
 
-  // Auto-save draft on form changes (debounced)
+  // Auto-save the draft (debounced), tied to the playlist it was written on
   useEffect(() => {
-    if (isInitialLoad.current) return
-    if (activeSession) return // Don't save draft during active session
-
-    const timeoutId = setTimeout(() => {
+    if (isInitialLoad.current || activeSession) return
+    const id = setTimeout(() => {
       saveDraftFormState({
         startTime,
         sunriseTime,
         sunsetTime,
-        durationPreset,
         phases,
         journeyName,
+        playlistUrl: page.url ?? undefined,
         lastUpdated: Date.now(),
       })
     }, 500)
+    return () => clearTimeout(id)
+  }, [startTime, sunriseTime, sunsetTime, phases, journeyName, page.url, activeSession])
 
-    return () => clearTimeout(timeoutId)
-  }, [startTime, sunriseTime, sunsetTime, durationPreset, phases, journeyName, activeSession])
-
-  async function handleStartPlanning() {
-    // Calculate start timestamp from time input or use now
-    let startTimestamp: number
-    if (startTime) {
-      const [hours, minutes] = startTime.split(':').map(Number)
-      const now = new Date()
-      now.setHours(hours, minutes, 0, 0)
-      // If the time is in the past, assume it's for today still (user just started)
-      startTimestamp = now.getTime()
-    } else {
-      startTimestamp = Date.now()
+  async function handleStart() {
+    let title = page.title
+    if (!journeyName.trim() && !title && tabId.current) {
+      const info = await sendMessageToContentScript<PageInfo>(tabId.current, { type: 'GET_PLAYLIST_URL' })
+      title = info?.title ?? null
     }
-
-    // Calculate celestial timestamps if times are set
-    const sunriseTimestamp = sunriseTime
-      ? timeInputToTimestamp(sunriseTime, startTimestamp)
-      : undefined
-    const sunsetTimestamp = sunsetTime
-      ? timeInputToTimestamp(sunsetTime, startTimestamp)
-      : undefined
-
+    const name = journeyName.trim() || title || 'Journey'
+    const start = resolveStartTimestamp(startTime, totalMinutes(phases))
     const session: Session = {
-      startTime: startTimestamp,
+      startTime: start,
       phases: phases.map((p) => ({ ...p })),
       sunriseTime: sunriseTime || undefined,
       sunsetTime: sunsetTime || undefined,
-      sunriseTimestamp,
-      sunsetTimestamp,
-      journeyName: journeyName || undefined,
-      playlistUrl: currentPlaylistUrl || undefined,
+      sunriseTimestamp: sunriseTime ? timeInputToTimestamp(sunriseTime, start) : undefined,
+      sunsetTimestamp: sunsetTime ? timeInputToTimestamp(sunsetTime, start) : undefined,
+      journeyName: name,
+      playlistUrl: page.url || undefined,
     }
 
-    // Clear draft and save session
     await clearDraftFormState()
     await setActiveSession(session)
     setActiveSessionState(session)
-
-    // Notify content script directly (fallback for storage listener)
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-    if (tabs[0]?.id) {
-      await sendMessageToContentScript(tabs[0].id, { type: 'SESSION_STARTED', session })
+    setJourneyName(name)
+    if (tabId.current) {
+      await sendMessageToContentScript(tabId.current, { type: 'SESSION_STARTED', session })
     }
 
-    // Save journey if we have a playlist URL and name
-    if (currentPlaylistUrl && journeyName) {
+    if (page.url) {
+      const existing = await getSavedJourney(page.url)
       await saveJourney({
-        name: journeyName,
-        playlistUrl: currentPlaylistUrl,
+        name,
+        playlistUrl: page.url,
+        playlistTitle: title || undefined,
         phases: phases.map((p) => ({ ...p })),
         startTime: startTime || undefined,
         sunriseTime: sunriseTime || undefined,
         sunsetTime: sunsetTime || undefined,
-        durationPreset,
-        createdAt: Date.now(),
+        createdAt: existing?.createdAt ?? Date.now(),
         updatedAt: Date.now(),
       })
+      setJourneys(await listJourneys())
     }
   }
 
-  async function handleEndSession() {
-    // Preserve current session values to draft form state before clearing
+  async function handleEnd() {
     if (activeSession) {
-      const startTimeStr = new Date(activeSession.startTime)
-        .toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
-
-      await saveDraftFormState({
+      const startTimeStr = new Date(activeSession.startTime).toLocaleTimeString('en-GB', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+      const draft = {
         startTime: startTimeStr,
         sunriseTime: activeSession.sunriseTime || '',
         sunsetTime: activeSession.sunsetTime || '',
-        durationPreset,
         phases: activeSession.phases,
         journeyName: activeSession.journeyName || '',
+        playlistUrl: activeSession.playlistUrl,
         lastUpdated: Date.now(),
-      })
-
-      // Update local state to match preserved values
-      setStartTime(startTimeStr)
-      setSunriseTime(activeSession.sunriseTime || '')
-      setSunsetTime(activeSession.sunsetTime || '')
-      setPhases(activeSession.phases)
-      setJourneyName(activeSession.journeyName || '')
+      }
+      await saveDraftFormState(draft)
+      setStartTime(draft.startTime)
+      setSunriseTime(draft.sunriseTime)
+      setSunsetTime(draft.sunsetTime)
+      setPhases(draft.phases)
+      setJourneyName(draft.journeyName)
     }
-
     await setActiveSession(null)
     setActiveSessionState(null)
-
-    // Notify content script directly
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-    if (tabs[0]?.id) {
-      await sendMessageToContentScript(tabs[0].id, { type: 'SESSION_ENDED' })
+    if (tabId.current) {
+      await sendMessageToContentScript(tabId.current, { type: 'SESSION_ENDED' })
     }
   }
 
-  function handleAddPhase() {
-    const newPhase: Phase = {
-      id: generateId(),
-      name: 'New Phase',
-      duration: 60,
-      color: '#9C27B0',
-    }
-    setPhases([...phases, newPhase])
+  function openPlaylist(url: string) {
+    if (tabId.current) chrome.tabs.update(tabId.current, { url })
   }
 
-  function handleUpdatePhase(id: string, updates: Partial<Phase>) {
-    setPhases(phases.map((p) => (p.id === id ? { ...p, ...updates } : p)))
+  function handleOpenJourney(journey: SavedJourney) {
+    // Apply right away; the page navigation catches up on its own
+    setPage({ url: journey.playlistUrl, title: journey.playlistTitle || null })
+    loadForm({ url: journey.playlistUrl, title: journey.playlistTitle || null })
+    openPlaylist(journey.playlistUrl)
+    setScreen('plan')
   }
 
-  function handleDeletePhase(id: string) {
-    setPhases(phases.filter((p) => p.id !== id))
+  async function handleDeleteJourney(playlistUrl: string) {
+    await deleteJourney(playlistUrl)
+    setJourneys(await listJourneys())
   }
 
-  function handleClearPhases() {
-    setPhases([])
-    setDurationPreset('custom')
-  }
-
-  async function handleResetForm() {
-    await clearDraftFormState()
-    setStartTime('')
-    setSunriseTime('')
-    setSunsetTime('')
-    setPhases(DEFAULT_PHASES.map((p) => ({ ...p, id: generateId() })))
-    setJourneyName('')
-    setDurationPreset('12h')
-  }
-
-  function handleReorderPhases(newPhases: Phase[]) {
-    setPhases(newPhases)
+  function handleUsePreset(preset: Preset) {
+    setPhases(freshIds(preset.phases))
+    setScreen('plan')
   }
 
   async function handleSavePreset(name: string) {
-    const preset: Preset = { name, phases: phases.map((p) => ({ ...p })) }
-    await savePreset(preset)
+    await savePreset({ name, phases: phases.map((p) => ({ ...p })) })
     setPresets(await getPresets())
-  }
-
-  function handleLoadPreset(preset: Preset) {
-    setPhases(preset.phases.map((p) => ({ ...p, id: generateId() })))
-    setTab('session')
   }
 
   async function handleDeletePreset(name: string) {
@@ -323,48 +295,36 @@ export default function App() {
     setPresets(DEFAULT_PRESETS)
   }
 
-  const totalDuration = phases.reduce((sum, p) => sum + p.duration, 0)
-
-  async function handleExportTracklist() {
-    if (!activeSession) return
-
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true })
-    if (!tabs[0]?.id) {
-      alert('Please open YouTube Music to export the tracklist')
-      return
-    }
-
-    const response = await sendMessageToContentScript<{ tracks: ExportedTracklist['tracks']; playlistTitle: string }>(
-      tabs[0].id,
-      { type: 'EXPORT_TRACKLIST' }
-    )
-
+  async function handleExport() {
+    if (!activeSession || !tabId.current) return
+    const response = await sendMessageToContentScript<{
+      tracks: ExportedTracklist['tracks']
+      playlistTitle: string
+    }>(tabId.current, { type: 'EXPORT_TRACKLIST' })
     if (!response) {
-      alert('Could not connect to YouTube Music. Please refresh the page and try again.')
+      alert('Could not reach YouTube Music. Reload the page and try again.')
       return
     }
-    if (!response.tracks || response.tracks.length === 0) {
-      alert('No tracks found. Make sure the playlist tracks are visible on the page.')
+    if (!response.tracks?.length) {
+      alert('No tracks found. Open the playlist so its tracks are visible, then try again.')
       return
     }
-
+    const tracks = response.tracks
     const exportData: ExportedTracklist = {
-      journeyName: activeSession.journeyName || 'Unnamed Journey',
-      playlistUrl: currentPlaylistUrl || '',
+      journeyName: activeSession.journeyName || 'Journey',
+      playlistUrl: page.url || '',
       playlistTitle: response.playlistTitle || 'Unknown Playlist',
       exportedAt: new Date().toISOString(),
       session: {
-        startTime: formatTime(new Date(activeSession.startTime)),
+        startTime: formatClock(activeSession.startTime),
         phases: activeSession.phases,
         sunriseTime: activeSession.sunriseTime,
         sunsetTime: activeSession.sunsetTime,
       },
-      tracks: response.tracks || [],
-      totalDuration: formatDurationCompact((response.tracks || []).reduce((sum, t) => sum + t.durationMinutes, 0)),
-      totalTracks: (response.tracks || []).length,
+      tracks,
+      totalDuration: formatDurationCompact(tracks.reduce((sum, t) => sum + t.durationMinutes, 0)),
+      totalTracks: tracks.length,
     }
-
-    // Download JSON
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -372,300 +332,184 @@ export default function App() {
     a.download = `setflow-${(activeSession.journeyName || 'journey').replace(/[^a-z0-9]/gi, '-')}-${Date.now()}.json`
     document.body.appendChild(a)
     a.click()
-    document.body.removeChild(a)
+    a.remove()
     URL.revokeObjectURL(url)
   }
-
-  function formatTime(date: Date): string {
-    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  }
-
-  const phaseTimeRanges = useMemo(() => {
-    if (!activeSession) return []
-    const sessionStartTime = activeSession.startTime
-    let accumulatedMinutes = 0
-    return phases.map((phase) => {
-      const phaseStart = new Date(sessionStartTime + accumulatedMinutes * 60 * 1000)
-      accumulatedMinutes += phase.duration
-      const phaseEnd = new Date(sessionStartTime + accumulatedMinutes * 60 * 1000)
-      return {
-        phase,
-        startTime: phaseStart.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-        endTime: phaseEnd.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-        startTimestamp: phaseStart.getTime(),
-        endTimestamp: phaseEnd.getTime(),
-      }
-    })
-  }, [activeSession, phases])
-
-  const getCelestialInPhase = (phaseStart: number, phaseEnd: number) => {
-    const events: { type: 'sunrise' | 'sunset'; time: string }[] = []
-    if (activeSession?.sunriseTimestamp &&
-        activeSession.sunriseTimestamp >= phaseStart &&
-        activeSession.sunriseTimestamp < phaseEnd) {
-      events.push({ type: 'sunrise', time: formatTime(new Date(activeSession.sunriseTimestamp)) })
-    }
-    if (activeSession?.sunsetTimestamp &&
-        activeSession.sunsetTimestamp >= phaseStart &&
-        activeSession.sunsetTimestamp < phaseEnd) {
-      events.push({ type: 'sunset', time: formatTime(new Date(activeSession.sunsetTimestamp)) })
-    }
-    return events
-  }
-
-  // Track which celestial events are shown inline with phases
-  const celestialEventsInline = useMemo(() => {
-    const inline = { sunrise: false, sunset: false }
-    for (const { startTimestamp, endTimestamp } of phaseTimeRanges) {
-      if (activeSession?.sunriseTimestamp &&
-          activeSession.sunriseTimestamp >= startTimestamp &&
-          activeSession.sunriseTimestamp < endTimestamp) {
-        inline.sunrise = true
-      }
-      if (activeSession?.sunsetTimestamp &&
-          activeSession.sunsetTimestamp >= startTimestamp &&
-          activeSession.sunsetTimestamp < endTimestamp) {
-        inline.sunset = true
-      }
-    }
-    return inline
-  }, [activeSession, phaseTimeRanges])
 
   if (isOnYouTubeMusic === false) {
     return (
       <div className="app">
-        <header className="header">
-          <h1>Setflow</h1>
+        <header className="topbar">
+          <span className="wordmark">Setflow</span>
         </header>
-        <div className="disabled-state">
-          <p>Open a YouTube Music playlist to use Setflow</p>
-        </div>
+        <p className="disabled-state">Open a YouTube Music playlist to plan a journey.</p>
       </div>
     )
   }
 
+  if (screen === 'library') {
+    return (
+      <div className="app">
+        <header className="topbar">
+          <button type="button" className="link" onClick={() => setScreen('plan')}>
+            ← Back
+          </button>
+          <span className="wordmark">Library</span>
+        </header>
+        <Library
+          journeys={journeys}
+          presets={presets}
+          currentPhases={phases}
+          onOpenJourney={handleOpenJourney}
+          onDeleteJourney={handleDeleteJourney}
+          onUsePreset={handleUsePreset}
+          onSavePreset={handleSavePreset}
+          onDeletePreset={handleDeletePreset}
+          onRestoreDefaults={handleRestoreDefaults}
+        />
+      </div>
+    )
+  }
+
+  // Planned or running start, and the celestial moments relative to it
+  const start = activeSession
+    ? activeSession.startTime
+    : resolveStartTimestamp(startTime, totalMinutes(phases))
+  const sunrise = activeSession
+    ? activeSession.sunriseTimestamp
+    : sunriseTime
+      ? timeInputToTimestamp(sunriseTime, start)
+      : undefined
+  const sunset = activeSession
+    ? activeSession.sunsetTimestamp
+    : sunsetTime
+      ? timeInputToTimestamp(sunsetTime, start)
+      : undefined
+
+  // The plan can't show a sunrise or sunset that falls outside it; say where it is instead
+  const end = start + totalMinutes(activeSession ? activeSession.phases : phases) * 60 * 1000
+  const outsideNotes = (
+    [
+      ['☀ Sunrise', sunrise],
+      ['☾ Sunset', sunset],
+    ] as [string, number | undefined][]
+  )
+    .filter(([, t]) => t !== undefined && (t < start || t >= end))
+    .map(([label, t]) =>
+      t! < start
+        ? `${label} ${formatClock(t!)} is ${formatDurationCompact(Math.round((start - t!) / 60000))} before the plan starts`
+        : `${label} ${formatClock(t!)} is ${formatDurationCompact(Math.round((t! - end) / 60000))} after it ends`
+    )
+  const notes = outsideNotes.map((text) => (
+    <p key={text} className="strip-note">
+      {text}
+    </p>
+  ))
+  const awayFromPlaylist = !!activeSession?.playlistUrl && activeSession.playlistUrl !== page.url
+
   return (
     <div className="app">
-      <header className="header">
-        <h1>Setflow</h1>
+      <header className="topbar">
+        <span className="wordmark">Setflow</span>
+        <button type="button" className="link" onClick={() => setScreen('library')}>
+          Library
+        </button>
       </header>
 
-      <div className="tabs">
-        <button
-          className={`tab ${tab === 'session' ? 'active' : ''}`}
-          onClick={() => setTab('session')}
-        >
-          Session
-        </button>
-        <button
-          className={`tab ${tab === 'presets' ? 'active' : ''}`}
-          onClick={() => setTab('presets')}
-        >
-          Presets
-        </button>
-      </div>
-
-      {tab === 'session' && (
+      {activeSession ? (
         <>
-          {activeSession && (
-            <div className="active-badge">
-              <span className="pulse-dot"></span>
-              {activeSession.journeyName || 'Journey Active'}
-            </div>
-          )}
-
-          {activeSession?.playlistUrl && currentPlaylistUrl && activeSession.playlistUrl !== currentPlaylistUrl && (
-            <div className="url-mismatch-warning">
-              You&apos;ve navigated away from the session&apos;s playlist
-            </div>
-          )}
-
-          {activeSession && (
-            <div className="phase-schedule">
-              <div className="phase-schedule-item">
-                <span className="phase-schedule-dot" style={{ background: '#666' }}></span>
-                <span className="phase-schedule-name">Started</span>
-                <span className="phase-schedule-time">
-                  {formatTime(new Date(activeSession.startTime))}
-                </span>
-              </div>
-
-              {phaseTimeRanges.map(({ phase, startTime, endTime, startTimestamp, endTimestamp }) => {
-                const celestialEvents = getCelestialInPhase(startTimestamp, endTimestamp)
-                return (
-                  <div key={phase.id} className="phase-schedule-item">
-                    <span
-                      className="phase-schedule-dot"
-                      style={{ background: phase.color }}
-                    ></span>
-                    <span className="phase-schedule-name">
-                      {phase.name}
-                      {celestialEvents.map(e => (
-                        <span
-                          key={e.type}
-                          className="celestial-icon"
-                          title={`${e.type === 'sunrise' ? 'Sunrise' : 'Sunset'} at ${e.time}`}
-                        >
-                          {e.type === 'sunrise' ? '☀️' : '🌙'}
-                        </span>
-                      ))}
-                    </span>
-                    <span className="phase-schedule-time">
-                      {startTime} – {endTime}
-                    </span>
-                  </div>
-                )
-              })}
-
-              {activeSession.sunriseTimestamp && !celestialEventsInline.sunrise && (
-                <div className="phase-schedule-item">
-                  <span className="phase-schedule-dot" style={{ background: '#FFB74D' }}></span>
-                  <span className="phase-schedule-name">☀️ Sunrise</span>
-                  <span className="phase-schedule-time">{formatTime(new Date(activeSession.sunriseTimestamp))}</span>
-                </div>
-              )}
-              {activeSession.sunsetTimestamp && !celestialEventsInline.sunset && (
-                <div className="phase-schedule-item">
-                  <span className="phase-schedule-dot" style={{ background: '#5C6BC0' }}></span>
-                  <span className="phase-schedule-name">🌙 Sunset</span>
-                  <span className="phase-schedule-time">{formatTime(new Date(activeSession.sunsetTimestamp))}</span>
-                </div>
-              )}
-            </div>
-          )}
-
-          {!activeSession && (
-            <>
-              <div className="section">
-                <div className="setting-group full-width">
-                  <span className="section-title">Journey Name</span>
-                  <input
-                    type="text"
-                    className="text-input"
-                    value={journeyName}
-                    onChange={(e) => setJourneyName(e.target.value)}
-                    placeholder="My Sunrise Set"
-                  />
-                  {currentPlaylistUrl && (
-                    <span className="input-hint">Linked to current playlist</span>
-                  )}
-                </div>
-              </div>
-
-              <div className="section">
-                <div className="settings-row">
-                  <div className="setting-group">
-                    <span className="section-title">Start Time</span>
-                    <input
-                      type="time"
-                      className="time-input"
-                      value={startTime}
-                      onChange={(e) => setStartTime(e.target.value)}
-                      placeholder="Now"
-                    />
-                  </div>
-                  <div className="setting-group">
-                    <span className="section-title">Duration</span>
-                    <div className="duration-display">
-                      <span className="duration-value">{formatDurationCompact(totalDuration)}</span>
-                      <span className="duration-hint">Edit phases below</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="section">
-                <div className="settings-row">
-                  <div className="setting-group">
-                    <span className="section-title">☀️ Sunrise</span>
-                    <input
-                      type="time"
-                      className="time-input"
-                      value={sunriseTime}
-                      onChange={(e) => setSunriseTime(e.target.value)}
-                      placeholder="Optional"
-                    />
-                  </div>
-                  <div className="setting-group">
-                    <span className="section-title">🌙 Sunset</span>
-                    <input
-                      type="time"
-                      className="time-input"
-                      value={sunsetTime}
-                      onChange={(e) => setSunsetTime(e.target.value)}
-                      placeholder="Optional"
-                    />
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-
-          <div className="section">
-            <div className="section-header">
-              <span className="section-title">Phases</span>
-              <div className="section-header-right">
-                {phases.length > 0 && !activeSession && (
-                  <button className="clear-btn" onClick={handleClearPhases}>
-                    Clear
-                  </button>
-                )}
-                {phases.length > 0 && (
-                  <span className="total-duration">
-                    {formatDurationCompact(totalDuration)}
-                  </span>
-                )}
-              </div>
-            </div>
-            <PhaseEditor
-              phases={phases}
-              disabled={!!activeSession}
-              startTime={startTime}
-              onAdd={handleAddPhase}
-              onUpdate={handleUpdatePhase}
-              onDelete={handleDeletePhase}
-              onReorder={handleReorderPhases}
-            />
+          <div className="journey-head">
+            <h2 className="journey-title">{activeSession.journeyName || 'Journey'}</h2>
           </div>
-
-          {activeSession ? (
-            <div className="button-row">
-              <button className="btn btn-secondary" onClick={handleExportTracklist}>
-                Export JSON
-              </button>
-              <button className="btn btn-danger" onClick={handleEndSession}>
-                End Planning
+          {awayFromPlaylist ? (
+            <div className="notice">
+              <span>{page.url ? "This isn't the journey's playlist." : 'The journey\'s playlist is elsewhere.'}</span>
+              <button
+                type="button"
+                className="link"
+                onClick={() => openPlaylist(activeSession.playlistUrl!)}
+              >
+                Open it
               </button>
             </div>
           ) : (
-            <div className="button-row">
-              <button className="btn btn-secondary" onClick={handleResetForm}>
-                Reset
-              </button>
-              <button className="btn btn-primary" onClick={handleStartPlanning}>
-                Start Planning
-              </button>
-            </div>
+            <p className="subline">Planning this playlist. Its tracks are marked by phase.</p>
           )}
-
-          <p className="hint">
-            {activeSession
-              ? 'Phases are now highlighted on YouTube Music playlists'
-              : 'Configure phases above, then start to highlight tracks on YouTube Music'
-            }
-          </p>
+          <JourneyStrip phases={activeSession.phases} start={start} sunrise={sunrise} sunset={sunset} />
+          {notes}
+          <PhaseEditor
+            phases={activeSession.phases}
+            disabled
+            start={start}
+            sunrise={sunrise}
+            sunset={sunset}
+            onAdd={() => {}}
+            onUpdate={() => {}}
+            onDelete={() => {}}
+            onUsePreset={() => {}}
+          />
+          <div className="actions">
+            <button type="button" className="btn btn-secondary" onClick={handleExport}>
+              Export JSON
+            </button>
+            <button type="button" className="btn btn-primary" onClick={handleEnd}>
+              End planning
+            </button>
+          </div>
         </>
-      )}
-
-      {tab === 'presets' && (
-        <PresetManager
-          presets={presets}
-          currentPhases={phases}
-          onLoad={handleLoadPreset}
-          onSave={handleSavePreset}
-          onDelete={handleDeletePreset}
-          onRestoreDefaults={handleRestoreDefaults}
-        />
+      ) : (
+        <>
+          <div className="journey-head">
+            <input
+              type="text"
+              className="name-input"
+              value={journeyName}
+              placeholder="Journey name"
+              aria-label="Journey name"
+              onChange={(e) => setJourneyName(e.target.value)}
+            />
+          </div>
+          <p className="subline">
+            {page.url ? 'Linked to this playlist' : 'Open a playlist to link this journey to it'}
+          </p>
+          <JourneyStrip phases={phases} start={start} sunrise={sunrise} sunset={sunset} />
+          {notes}
+          <div className="times">
+            <label className="field">
+              Start
+              <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
+            </label>
+            <label className="field">
+              ☀ Sunrise
+              <input type="time" value={sunriseTime} onChange={(e) => setSunriseTime(e.target.value)} />
+            </label>
+            <label className="field">
+              ☾ Sunset
+              <input type="time" value={sunsetTime} onChange={(e) => setSunsetTime(e.target.value)} />
+            </label>
+          </div>
+          <PhaseEditor
+            phases={phases}
+            disabled={false}
+            start={start}
+            sunrise={sunrise}
+            sunset={sunset}
+            onAdd={() =>
+              setPhases([...phases, { id: generateId(), name: 'New phase', duration: 60, color: '#9C27B0' }])
+            }
+            onUpdate={(id, updates) => setPhases(phases.map((p) => (p.id === id ? { ...p, ...updates } : p)))}
+            onDelete={(id) => setPhases(phases.filter((p) => p.id !== id))}
+            onUsePreset={() => setScreen('library')}
+          />
+          <button
+            type="button"
+            className="btn btn-primary"
+            disabled={phases.length === 0}
+            onClick={handleStart}
+          >
+            Start planning
+          </button>
+        </>
       )}
     </div>
   )

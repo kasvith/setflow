@@ -5,8 +5,6 @@ const STORAGE_KEY = 'setflow'
 const defaultData: StorageData = {
   activeSession: null,
   presets: DEFAULT_PRESETS,
-  overlayMinimized: false,
-  overlayPosition: null,
   draftFormState: null,
   savedJourneys: {},
 }
@@ -56,31 +54,6 @@ export async function deletePreset(name: string): Promise<void> {
   await setStorageData({
     presets: data.presets.filter((p) => p.name !== name),
   })
-}
-
-export async function getOverlayState(): Promise<{
-  minimized: boolean
-  position: { x: number; y: number } | null
-}> {
-  const data = await getStorageData()
-  return {
-    minimized: data.overlayMinimized,
-    position: data.overlayPosition,
-  }
-}
-
-export async function setOverlayState(state: {
-  minimized?: boolean
-  position?: { x: number; y: number } | null
-}): Promise<void> {
-  const updates: Partial<StorageData> = {}
-  if (state.minimized !== undefined) {
-    updates.overlayMinimized = state.minimized
-  }
-  if (state.position !== undefined) {
-    updates.overlayPosition = state.position
-  }
-  await setStorageData(updates)
 }
 
 export function onStorageChange(
