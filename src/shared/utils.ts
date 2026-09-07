@@ -1,4 +1,4 @@
-import { Phase, Session } from './types'
+import type { Phase, Session } from './types'
 
 export interface PhaseInfo {
   phase: Phase
@@ -103,6 +103,28 @@ export function getPhaseAtTime(session: Session, minutesFromStart: number): Phas
   }
 
   return null
+}
+
+// Phases overlapping [start, end), each with the fraction of that range it covers (0-1)
+export function getPhasesInRange(
+  session: Session,
+  start: number,
+  end: number
+): { phase: Phase; from: number; to: number }[] {
+  const span = end - start || 1
+  const overlaps: { phase: Phase; from: number; to: number }[] = []
+  let accumulatedTime = 0
+
+  for (const phase of session.phases) {
+    const from = Math.max(start, accumulatedTime)
+    const to = Math.min(end, accumulatedTime + phase.duration)
+    if (to > from) {
+      overlaps.push({ phase, from: (from - start) / span, to: (to - start) / span })
+    }
+    accumulatedTime += phase.duration
+  }
+
+  return overlaps
 }
 
 export function generateId(): string {

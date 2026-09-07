@@ -1,11 +1,14 @@
 import { getActiveSession, onStorageChange } from '../shared/storage'
 import { Session, Phase, ExportedTrack } from '../shared/types'
-import { getPhaseAtTime } from '../shared/utils'
+import { getPhaseAtTime, getPhasesInRange } from '../shared/utils'
 
 let session: Session | null = null
 let popover: HTMLElement | null = null
 let labelIntervalId: number | null = null
 let debounceTimeout: number | null = null
+let hoverFrame = 0
+// Per-row hover data; dies with the row instead of round-tripping through JSON attributes
+let trackInfos = new WeakMap<Element, TrackInfo>()
 
 // Check if extension context is still valid (not invalidated by reload)
 function isExtensionContextValid(): boolean {
@@ -22,6 +25,11 @@ function getCurrentPlaylistUrl(): string | null {
   return null
 }
 
+// Only the playlist the session was started on gets labelled (sessions without a URL label any)
+function isTracking(): boolean {
+  return !!session && (!session.playlistUrl || session.playlistUrl === getCurrentPlaylistUrl())
+}
+
 // Notify popup of URL change
 function notifyUrlChange() {
   if (!isExtensionContextValid()) return
@@ -34,39 +42,14 @@ function notifyUrlChange() {
   })
 }
 
-// Monitor URL changes using History API (YouTube Music is a SPA)
-function setupUrlChangeListener() {
-  // Listen for back/forward navigation
-  window.addEventListener('popstate', notifyUrlChange)
-
-  // Intercept pushState and replaceState for programmatic navigation
-  // Guard against duplicate wrapping if script re-runs
-  type WrappedHistoryFn = History['pushState'] & { __setflow_wrapped?: boolean }
-  const pushStateFn = history.pushState as WrappedHistoryFn
-  const replaceStateFn = history.replaceState as WrappedHistoryFn
-
-  if (!pushStateFn.__setflow_wrapped) {
-    const originalPushState = history.pushState.bind(history)
-    const wrappedPushState: WrappedHistoryFn = (...args: Parameters<typeof history.pushState>) => {
-      originalPushState(...args)
-      notifyUrlChange()
-    }
-    wrappedPushState.__setflow_wrapped = true
-    history.pushState = wrappedPushState
-  }
-
-  if (!replaceStateFn.__setflow_wrapped) {
-    const originalReplaceState = history.replaceState.bind(history)
-    const wrappedReplaceState: WrappedHistoryFn = (...args: Parameters<typeof history.replaceState>) => {
-      originalReplaceState(...args)
-      notifyUrlChange()
-    }
-    wrappedReplaceState.__setflow_wrapped = true
-    history.replaceState = wrappedReplaceState
-  }
-}
-
-setupUrlChangeListener()
+// YouTube Music is a SPA. Its navigations happen in the page's world, invisible to a content
+// script's history monkeypatch, but the browser's Navigation API fires here for every
+// pushState/replaceState/back/forward. (Types for it are not in this TS lib yet.)
+const navigation = (window as Window & { navigation?: EventTarget }).navigation
+navigation?.addEventListener('currententrychange', () => {
+  notifyUrlChange()
+  sync()
+})
 
 // Format time from session start minutes
 function formatTimeFromMinutes(session: Session | null, minutes: number): string {
@@ -170,20 +153,10 @@ if (isExtensionContextValid()) {
       sendResponse({ tracks, playlistTitle })
       return true
     }
-    if (message.type === 'SESSION_STARTED') {
-      // Direct notification from popup - update session and label tracks
-      session = message.session
-      if (session) {
-        labelTracks()
-        startObserver()
-      }
-      sendResponse({ success: true })
-      return true
-    }
-    if (message.type === 'SESSION_ENDED') {
-      session = null
-      removeLabels()
-      stopObserver()
+    if (message.type === 'SESSION_STARTED' || message.type === 'SESSION_ENDED') {
+      // Direct notification from popup (fallback for storage listener)
+      session = message.type === 'SESSION_STARTED' ? message.session : null
+      sync()
       sendResponse({ success: true })
       return true
     }
@@ -195,9 +168,6 @@ interface TrackInfo {
   trackStart: number // minutes from journey start
   trackEnd: number
   trackDuration: number // track duration in minutes
-  phase: Phase | null
-  nextPhase: Phase | null
-  minutesUntilNextPhase: number | null
   sunriseMinutes: number | null
   sunsetMinutes: number | null
 }
@@ -264,24 +234,6 @@ function getPhaseTimeRange(session: Session, phase: Phase): { start: string; end
   return { start: '', end: '' }
 }
 
-function getNextPhase(session: Session, currentPhase: Phase): { phase: Phase; startsIn: number } | null {
-  let accumulatedMinutes = 0
-  let foundCurrent = false
-
-  for (const p of session.phases) {
-    if (foundCurrent) {
-      const now = Date.now()
-      const elapsedMinutes = (now - session.startTime) / (1000 * 60)
-      return { phase: p, startsIn: accumulatedMinutes - elapsedMinutes }
-    }
-    if (p.id === currentPhase.id || p.name === currentPhase.name) {
-      foundCurrent = true
-    }
-    accumulatedMinutes += p.duration
-  }
-  return null
-}
-
 function createPopover(): HTMLElement {
   const el = document.createElement('div')
   el.className = 'setflow-popover'
@@ -316,13 +268,14 @@ function showPopover(target: HTMLElement, info: TrackInfo, mouseY: number) {
   }
   html += `<div class="popover-time">${timeDisplay}</div>`
 
-  // Current phase
-  if (info.phase) {
-    const timeRange = getPhaseTimeRange(session, info.phase)
+  // Phase at the hovered position (a track can straddle two phases)
+  const phase = getPhaseAtTime(session, simulatedMinutes)
+  if (phase) {
+    const timeRange = getPhaseTimeRange(session, phase)
     html += `
       <div class="popover-phase">
-        <span class="phase-dot" style="background: ${info.phase.color}"></span>
-        <span class="phase-name">${info.phase.name}</span>
+        <span class="phase-dot" style="background: ${phase.color}"></span>
+        <span class="phase-name">${phase.name}</span>
         <span class="phase-range">${timeRange.start} – ${timeRange.end}</span>
       </div>
     `
@@ -374,6 +327,7 @@ function showPopover(target: HTMLElement, info: TrackInfo, mouseY: number) {
 }
 
 function hidePopover() {
+  cancelAnimationFrame(hoverFrame)
   if (popover) {
     popover.style.display = 'none'
   }
@@ -402,86 +356,84 @@ async function init() {
 
   try {
     session = await getActiveSession()
-
-    if (session) {
-      labelTracks()
-      startObserver()
-    }
+    sync()
 
     onStorageChange((data) => {
       if (!isExtensionContextValid()) return
+      // Every storage write (draft autosave, presets) lands here; only react when the session changed
+      if (JSON.stringify(data.activeSession) === JSON.stringify(session)) return
       session = data.activeSession
-      if (session) {
-        labelTracks()
-        startObserver()
-      } else {
-        removeLabels()
-        stopObserver()
-      }
+      sync()
     })
 
-    // Re-label periodically to update time-based positions
-    // Store interval ID for cleanup
+    // Only the phase header is time-based; track labels depend on playlist position alone
     if (labelIntervalId) clearInterval(labelIntervalId)
     labelIntervalId = setInterval(() => {
-      if (session && isExtensionContextValid()) {
-        labelTracks()
-      }
-    }, 10000) // Every 10 seconds
+      if (!isTracking() || !isExtensionContextValid()) return
+      addPhaseHeader()
+      observer?.takeRecords()
+    }, 10000)
   } catch {
     // Extension context may have been invalidated
   }
 }
 
-function startObserver() {
-  if (observer) return
+// Reconcile the page with the session: label + observe on the tracked playlist, clear elsewhere
+function sync() {
+  if (isTracking()) {
+    startObserver()
+  } else {
+    stopObserver()
+    removeLabels()
+  }
+}
 
-  // Only observe the playlist container, not entire document.body
-  const container = document.querySelector('#contents > ytmusic-playlist-shelf-renderer')
+let observerRetry: number | null = null
+
+function startObserver() {
+  stopObserver()
+
+  // ytmusic-browse-response survives SPA navigation; the playlist shelf inside it is rebuilt
+  // on every page change, so observing the shelf itself would go stale after the first navigation
+  const container = document.querySelector('ytmusic-browse-response')
   if (!container) {
-    // Retry after delay if container not found yet
-    setTimeout(startObserver, 1000)
+    observerRetry = setTimeout(startObserver, 1000)
     return
   }
 
   observer = new MutationObserver(() => {
-    if (session) {
-      // Proper debounce - clear previous timeout
-      if (debounceTimeout) clearTimeout(debounceTimeout)
-      debounceTimeout = setTimeout(labelTracks, 100)
-    }
+    if (debounceTimeout) clearTimeout(debounceTimeout)
+    debounceTimeout = setTimeout(labelTracks, 100)
   })
-
-  observer.observe(container, {
-    childList: true,
-    subtree: true,
-  })
+  observer.observe(container, { childList: true, subtree: true })
+  labelTracks()
 }
 
 function stopObserver() {
-  if (observer) {
-    observer.disconnect()
-    observer = null
-  }
+  if (observerRetry) clearTimeout(observerRetry)
+  if (debounceTimeout) clearTimeout(debounceTimeout)
+  observerRetry = debounceTimeout = null
+  observer?.disconnect()
+  observer = null
 }
 
 function removeLabels() {
+  trackInfos = new WeakMap()
   // Single consolidated query for all setflow elements
   document.querySelectorAll(
-    '.setflow-phase-indicator, .setflow-celestial-label, .setflow-phase-header, .setflow-popover, [data-setflow-phase], .setflow-beyond-phase'
+    '.setflow-celestial-label, .setflow-celestial-left-indicator, .setflow-phase-header, .setflow-popover, [data-setflow-phase], .setflow-beyond-phase'
   ).forEach((el) => {
-    if (el.classList.contains('setflow-phase-indicator') ||
-        el.classList.contains('setflow-celestial-label') ||
+    if (el.classList.contains('setflow-celestial-label') ||
+        el.classList.contains('setflow-celestial-left-indicator') ||
         el.classList.contains('setflow-phase-header') ||
         el.classList.contains('setflow-popover')) {
       el.remove()
     } else {
+      // data-setflow-bound stays: the hover listeners persist and no-op without track info
       const htmlEl = el as HTMLElement
       htmlEl.removeAttribute('data-setflow-phase')
-      htmlEl.removeAttribute('data-setflow-info')
-      htmlEl.removeAttribute('data-setflow-bound')
       htmlEl.classList.remove('setflow-beyond-phase')
-      htmlEl.style.borderLeft = ''
+      htmlEl.style.removeProperty('--setflow-stripe')
       htmlEl.style.background = ''
     }
   })
@@ -503,10 +455,7 @@ function parseDurationToMinutes(duration: string): number {
 }
 
 function labelTracks() {
-  if (!session) return
-
-  const now = Date.now()
-  const elapsedMinutes = (now - session.startTime) / (1000 * 60)
+  if (!session || !isTracking()) return
 
   // Calculate celestial moments (minutes from journey start)
   const sunriseMinutes = session.sunriseTimestamp
@@ -558,56 +507,39 @@ function labelTracks() {
     const trackStart = accumulatedTime
     const trackEnd = accumulatedTime + trackDuration
 
-    // Calculate which phase this track falls in
-    const phase = getPhaseAtTime(session!, accumulatedTime)
-
     const htmlItem = item as HTMLElement
 
-    // Get next phase info
-    const nextPhaseInfo = phase ? getNextPhase(session!, phase) : null
+    trackInfos.set(item, { trackStart, trackEnd, trackDuration, sunriseMinutes, sunsetMinutes })
 
-    // Store track info for popover
-    const trackInfo: TrackInfo = {
-      trackStart,
-      trackEnd,
-      trackDuration,
-      phase,
-      nextPhase: nextPhaseInfo?.phase || null,
-      minutesUntilNextPhase: nextPhaseInfo?.startsIn || null,
-      sunriseMinutes,
-      sunsetMinutes,
-    }
-
-    // Add popover event listeners (only once)
+    // Add popover event listeners (only once per row; the row's info is looked up live)
     if (!htmlItem.hasAttribute('data-setflow-bound')) {
       htmlItem.setAttribute('data-setflow-bound', 'true')
       htmlItem.addEventListener('mousemove', (e) => {
-        const info = JSON.parse(htmlItem.getAttribute('data-setflow-info') || '{}')
-        showPopover(htmlItem, info, e.clientY)
+        const info = trackInfos.get(htmlItem)
+        if (!info) return
+        // One popover render per frame; mousemove fires far more often than the screen repaints
+        cancelAnimationFrame(hoverFrame)
+        hoverFrame = requestAnimationFrame(() => showPopover(htmlItem, info, e.clientY))
       })
       htmlItem.addEventListener('mouseleave', hidePopover)
     }
 
-    // Store current track info as data attribute
-    htmlItem.setAttribute('data-setflow-info', JSON.stringify(trackInfo))
-
-    if (phase) {
-      // Style using border-left for reliable positioning
-      htmlItem.style.borderLeft = `4px solid ${phase.color}`
-      htmlItem.style.background = `linear-gradient(90deg, ${phase.color}15 0%, transparent 30%)`
-      htmlItem.setAttribute('data-setflow-phase', phase.name)
+    // A track can straddle phases: the left stripe shows every phase it overlaps, split in proportion
+    const phases = getPhasesInRange(session!, trackStart, trackEnd)
+    if (phases.length > 0) {
+      const stops = phases.map(({ phase, from, to }) => `${phase.color} ${from * 100}% ${to * 100}%`)
+      htmlItem.style.setProperty('--setflow-stripe', `linear-gradient(to bottom, ${stops.join(', ')})`)
+      const tint = phases[0].phase.color
+      htmlItem.style.background = `linear-gradient(90deg, ${tint}15 0%, transparent 30%)`
+      htmlItem.setAttribute('data-setflow-phase', phases.map((p) => p.phase.name).join(' / '))
       htmlItem.classList.remove('setflow-beyond-phase')
     } else {
       // No phase - show striped border indicator only
-      htmlItem.style.borderLeft = ''
+      htmlItem.style.removeProperty('--setflow-stripe')
       htmlItem.style.background = ''
       htmlItem.removeAttribute('data-setflow-phase')
       htmlItem.classList.add('setflow-beyond-phase')
     }
-
-    // Remove old absolute-positioned indicators if they exist
-    const oldIndicator = item.querySelector('.setflow-phase-indicator')
-    if (oldIndicator) oldIndicator.remove()
 
     // Check for celestial events on this track
     // First remove any existing celestial label
@@ -615,21 +547,30 @@ function labelTracks() {
 
     // Check for sunrise
     if (sunriseMinutes !== null && trackStart <= sunriseMinutes && trackEnd > sunriseMinutes) {
-      addCelestialLabel(item, 'sunrise')
+      addCelestialLabel(item, 'sunrise', sunriseMinutes, trackStart, trackDuration)
     }
     // Check for sunset
     else if (sunsetMinutes !== null && trackStart <= sunsetMinutes && trackEnd > sunsetMinutes) {
-      addCelestialLabel(item, 'sunset')
+      addCelestialLabel(item, 'sunset', sunsetMinutes, trackStart, trackDuration)
     }
 
     accumulatedTime += trackDuration
   })
 
   // Also add a header showing current phase if we're in an active session
-  addPhaseHeader(elapsedMinutes)
+  addPhaseHeader()
+
+  // Drop the mutation records this pass produced so the observer doesn't re-trigger itself
+  observer?.takeRecords()
 }
 
-function addCelestialLabel(item: Element, type: 'sunrise' | 'sunset') {
+function addCelestialLabel(
+  item: Element,
+  type: 'sunrise' | 'sunset',
+  eventMinutes: number,
+  trackStart: number,
+  trackDuration: number
+) {
   // Check if label already exists
   if (item.querySelector('.setflow-celestial-label')) return
 
@@ -652,6 +593,15 @@ function addCelestialLabel(item: Element, type: 'sunrise' | 'sunset') {
   } else {
     fixedColumns.insertBefore(label, fixedColumns.firstChild)
   }
+
+  // Add left-side indicator at proportional position
+  const positionInTrack = (eventMinutes - trackStart) / trackDuration
+  const indicator = document.createElement('div')
+  indicator.className = 'setflow-celestial-left-indicator'
+  indicator.setAttribute('data-type', type)
+  indicator.style.top = `${positionInTrack * 100}%`
+  indicator.innerHTML = `<span class="celestial-indicator-icon">${icon}</span>`
+  item.appendChild(indicator)
 }
 
 function removeCelestialLabel(item: Element) {
@@ -659,11 +609,16 @@ function removeCelestialLabel(item: Element) {
   if (label) {
     label.remove()
   }
+  const leftIndicator = item.querySelector('.setflow-celestial-left-indicator')
+  if (leftIndicator) {
+    leftIndicator.remove()
+  }
 }
 
-function addPhaseHeader(elapsedMinutes: number) {
+function addPhaseHeader() {
   if (!session) return
 
+  const elapsedMinutes = (Date.now() - session.startTime) / (1000 * 60)
   const currentPhase = getPhaseAtTime(session, elapsedMinutes)
 
   // Find the playlist header area
@@ -741,13 +696,11 @@ style.textContent = `
   }
 
   [data-setflow-phase] {
-    transition: background 0.3s ease, border-left 0.3s ease;
+    transition: background 0.3s ease;
   }
 
-  .setflow-beyond-phase {
-    position: relative;
-  }
-
+  /* Left stripe: phase colour(s) from --setflow-stripe, hatched once the track is past every phase */
+  [data-setflow-phase]::before,
   .setflow-beyond-phase::before {
     content: '';
     position: absolute;
@@ -755,13 +708,13 @@ style.textContent = `
     top: 0;
     bottom: 0;
     width: 4px;
-    background: repeating-linear-gradient(
+    background: var(--setflow-stripe, repeating-linear-gradient(
       -45deg,
       #555,
       #555 2px,
       #333 2px,
       #333 4px
-    );
+    ));
   }
 
   .setflow-celestial-label {
@@ -804,6 +757,52 @@ style.textContent = `
   @keyframes sunset-glow {
     0%, 100% { box-shadow: 0 0 4px rgba(92, 107, 192, 0.4); }
     50% { box-shadow: 0 0 16px rgba(92, 107, 192, 0.7); }
+  }
+
+  ytmusic-responsive-list-item-renderer {
+    position: relative;
+  }
+
+  .setflow-celestial-left-indicator {
+    position: absolute;
+    left: 0;
+    transform: translate(-50%, -50%);
+    z-index: 2;
+    cursor: pointer;
+    padding: 10px;
+  }
+
+  .celestial-indicator-icon {
+    display: block;
+    font-size: 14px;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.6));
+    transition: transform 0.3s ease, filter 0.3s ease;
+  }
+
+  .setflow-celestial-left-indicator:hover .celestial-indicator-icon {
+    transform: scale(1.4);
+  }
+
+  /* Sun: gentle continuous rotation */
+  .setflow-celestial-left-indicator[data-type="sunrise"]:hover .celestial-indicator-icon {
+    animation: sun-spin 4s linear infinite;
+    filter: drop-shadow(0 0 8px rgba(255, 180, 0, 0.9)) drop-shadow(0 0 16px rgba(255, 120, 0, 0.5));
+  }
+
+  /* Moon: gentle rocking like tides */
+  .setflow-celestial-left-indicator[data-type="sunset"]:hover .celestial-indicator-icon {
+    animation: moon-rock 2s ease-in-out infinite;
+    filter: drop-shadow(0 0 8px rgba(150, 170, 255, 0.9)) drop-shadow(0 0 16px rgba(100, 120, 200, 0.5));
+  }
+
+  @keyframes sun-spin {
+    from { transform: scale(1.4) rotate(0deg); }
+    to { transform: scale(1.4) rotate(360deg); }
+  }
+
+  @keyframes moon-rock {
+    0%, 100% { transform: scale(1.4) rotate(-8deg); }
+    50% { transform: scale(1.4) rotate(8deg); }
   }
 
   .setflow-popover {

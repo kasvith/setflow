@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome lint src",
     "format": "biome format src --write",
-    "check": "biome check src"
+    "check": "biome check src",
+    "test": "node --test scripts/*.test.ts"
   },
   "keywords": [
     "chrome-extension",
