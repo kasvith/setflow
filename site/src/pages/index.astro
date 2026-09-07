@@ -1,0 +1,772 @@
+---
+import Demo from '../components/Demo.astro'
+import { formatDate, formatSize, getReleases, inline } from '../data/releases'
+import '../styles/global.css'
+
+const REPO = 'https://github.com/kasvith/setflow'
+const releases = await getReleases()
+const [latest, ...older] = releases
+
+const features = [
+  {
+    color: 'var(--p2)',
+    title: 'Phases with colour',
+    text: 'Name each stretch of the night, give it a length and a colour. Every track picks up the colour of the phase it plays in, split in two when it straddles a boundary.',
+  },
+  {
+    color: 'var(--p4)',
+    title: 'Hover to time-travel',
+    text: 'Move across a track and read the clock at that exact second, the phase it lands in, and how far into the track you are.',
+  },
+  {
+    color: 'var(--p1)',
+    title: 'Sunrise and sunset',
+    text: 'Type the times and the playlist shows which track carries the sun up or down, with a countdown as you hover and a marker on the strip.',
+  },
+  {
+    color: 'var(--p3)',
+    title: 'A plan above the tracklist',
+    text: 'Name, span, how much of the plan the music covers, and a strip you can scrub to find the track playing at any minute.',
+  },
+  {
+    color: '#26c6da',
+    title: 'Library and presets',
+    text: 'Journeys are saved per playlist and reopen when you come back. Presets run from a quick two hours to a full twelve.',
+  },
+  {
+    color: '#66bb6a',
+    title: 'Export the set',
+    text: 'Every track with its clock time, phase and link as JSON, ready for a rider, a cue sheet, or your own tooling.',
+  },
+]
+
+const steps = [
+  ['Open a playlist', 'Any playlist on YouTube Music. Setflow reads the track lengths straight from the page.'],
+  ['Shape the plan', 'Click the icon, set a start time, edit the phases or pick a preset, add sunrise and sunset if the night needs them.'],
+  ['Start planning', 'The playlist is marked up in place. Hover to explore, scrub the strip, export the list when you are done.'],
+]
+---
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Setflow · plan your set on YouTube Music</title>
+    <meta name="description" content="Setflow is a Chrome extension that lays a plan over any YouTube Music playlist: phases with colours and durations, sunrise and sunset markers, and the clock time every track will play." />
+    <meta property="og:title" content="Setflow" />
+    <meta property="og:description" content="A timeline for your YouTube Music playlist. Phases, sunrise and sunset, and the clock time of every track." />
+    <meta name="theme-color" content="#121320" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preload" href="/fonts/AtkinsonHyperlegibleNext.woff2" as="font" type="font/woff2" crossorigin />
+  </head>
+  <body>
+    <header class="nav">
+      <div class="wrap nav-in">
+        <a href="#top" class="brand" aria-label="Setflow home">
+          <svg width="26" height="26" viewBox="0 0 16 16" aria-hidden="true">
+            <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#E91E63" /><stop offset="1" stop-color="#9C27B0" /></linearGradient></defs>
+            <rect width="16" height="16" rx="3" fill="url(#g)" /><circle cx="8" cy="8" r="4" fill="#fff" opacity=".9" /><circle cx="8" cy="8" r="2" fill="url(#g)" />
+          </svg>
+          Setflow
+        </a>
+        <nav class="links">
+          <a href="#features">Features</a>
+          <a href="#how">How it works</a>
+          <a href="#releases">Releases</a>
+          <a href="#about">About</a>
+          <a href={REPO} rel="noopener">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="glows" aria-hidden="true"><span class="glow a"></span><span class="glow b"></span><span class="glow c"></span></div>
+        <div class="wrap hero-in">
+          <p class="eyebrow rise">Chrome extension for YouTube Music</p>
+          <h1 class="rise" style="--d: 0.08s">A timeline for<br />your playlist.</h1>
+          <div class="hero-strip rise" style="--d: 0.14s" aria-hidden="true">
+            <span style="flex: 25; background: var(--p1)"></span>
+            <span style="flex: 50; background: var(--p2)"></span>
+            <span style="flex: 35; background: var(--p3)"></span>
+            <span style="flex: 25; background: var(--p4)"></span>
+            <b class="tick" style="left: 18%">☾</b>
+            <b class="tick" style="left: 90%">☀</b>
+          </div>
+          <p class="lede rise" style="--d: 0.2s">
+            Setflow lays a plan over any YouTube Music playlist: phases with their own colours and durations,
+            sunrise and sunset markers, and the clock time every track will play.
+          </p>
+          <div class="cta rise" style="--d: 0.24s">
+            <a class="btn primary" href={`${REPO}/releases/latest/download/setflow-extension.zip`}>Download latest <span class="dim">· zip</span></a>
+            <a class="btn ghost" href={REPO} rel="noopener">View on GitHub</a>
+          </div>
+          <p class="fine rise" style="--d: 0.3s">Free and open source, MIT. Everything stays in your browser.</p>
+        </div>
+        <div class="wrap demo-wrap rise" style="--d: 0.4s">
+          <Demo />
+          <p class="caption">
+            A live mock of the extension. Edit the plan on the left and the playlist follows. Hover the strip or a track.
+            In the real thing the playlist is marked once you press <b>Start planning</b>.
+          </p>
+        </div>
+      </section>
+
+      <section id="features" class="section">
+        <div class="wrap">
+          <p class="eyebrow reveal">What it does</p>
+          <h2 class="reveal">Built for long nights and early mornings.</h2>
+          <div class="grid">
+            {features.map((f, i) => (
+              <article class="card reveal" style={`--accent: ${f.color}; --d: ${i * 0.05}s`}>
+                <span class="swatch" aria-hidden="true"></span>
+                <h3>{f.title}</h3>
+                <p>{f.text}</p>
+              </article>
+            ))}
+          </div>
+          <p class="note reveal">
+            Local only. Journeys, presets and drafts live in the extension's storage. No account, no server, no analytics.
+          </p>
+        </div>
+      </section>
+
+      <section id="how" class="section">
+        <div class="wrap">
+          <p class="eyebrow reveal">How it works</p>
+          <h2 class="reveal">Three steps, then it stays out of the way.</h2>
+          <ol class="steps">
+            {steps.map(([title, text], i) => (
+              <li class="step reveal" style={`--d: ${i * 0.08}s`}>
+                <span class="num">{i + 1}</span>
+                <h3>{title}</h3>
+                <p>{text}</p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      <section id="releases" class="section">
+        <div class="wrap">
+          <p class="eyebrow reveal">Releases</p>
+          <h2 class="reveal">What's new.</h2>
+          {latest && (
+            <article class="release latest reveal">
+              <header>
+                <div>
+                  <span class="tag">{latest.tag}</span>
+                  <span class="date">{formatDate(latest.date)}</span>
+                  <span class="pill">Latest</span>
+                </div>
+                <div class="release-links">
+                  {latest.zip && <a class="btn small primary" href={latest.zip.url}>setflow-extension.zip · {formatSize(latest.zip.size)}</a>}
+                  <a class="btn small ghost" href={latest.url} rel="noopener">Release notes</a>
+                </div>
+              </header>
+              <div class="notes">
+                {latest.sections.length === 0 && <p class="muted">See the release notes on GitHub.</p>}
+                {latest.sections.map((s) => (
+                  <div class="notes-group">
+                    <h4>{s.title}</h4>
+                    <ul>{s.items.map((item) => <li set:html={inline(item)} />)}</ul>
+                  </div>
+                ))}
+              </div>
+            </article>
+          )}
+          <div class="older">
+            {older.map((r) => (
+              <details class="release reveal">
+                <summary>
+                  <span class="tag">{r.tag}</span>
+                  <span class="date">{formatDate(r.date)}</span>
+                  <span class="summary-hint">{r.sections.reduce((n, s) => n + s.items.length, 0) || 'see'} {r.sections.length ? 'changes' : 'GitHub'}</span>
+                </summary>
+                <div class="notes">
+                  {r.sections.length === 0 && <p class="muted">No notes were written for this one. <a href={r.url} rel="noopener">See it on GitHub.</a></p>}
+                  {r.sections.map((s) => (
+                    <div class="notes-group">
+                      <h4>{s.title}</h4>
+                      <ul>{s.items.map((item) => <li set:html={inline(item)} />)}</ul>
+                    </div>
+                  ))}
+                  <p class="release-foot"><a href={r.url} rel="noopener">Release on GitHub</a>{r.zip && <> · <a href={r.zip.url}>zip</a></>}</p>
+                </div>
+              </details>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="about" class="section">
+        <div class="wrap">
+          <p class="eyebrow reveal">About</p>
+          <div class="about reveal">
+            <img class="avatar" src="/kasun.png" width="120" height="120" alt="Kasun Vithanage" loading="lazy" />
+            <div>
+              <h2>Made by Kasun Vithanage.</h2>
+              <p class="about-line">CTO at WaveZync, based in Sri Lanka. Open source at heart, always learning something new.</p>
+              <p class="muted">
+                Setflow is a personal side project, built and maintained in the open. Found a bug or have an idea? <a href={`${REPO}/issues`} rel="noopener">Open an issue</a>.
+              </p>
+              <div class="about-links">
+                <a class="btn small ghost" href="https://github.com/kasvith" rel="noopener">GitHub</a>
+                <a class="btn small ghost" href="https://kasvith.me" rel="noopener">kasvith.me</a>
+                <a class="btn small ghost" href="https://x.com/kasvith" rel="noopener">@kasvith</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="install" class="section">
+        <div class="wrap install">
+          <div class="reveal">
+            <p class="eyebrow">Install</p>
+            <h2>Not on the Web Store yet, so it loads unpacked.</h2>
+            <p class="muted">Takes about a minute. Updates are a new zip over the same folder.</p>
+          </div>
+          <ol class="install-steps reveal">
+            <li><span>Download <b>setflow-extension.zip</b> from the latest release and unzip it.</span></li>
+            <li><span>Open <code>chrome://extensions</code> and switch on <b>Developer mode</b>, top right.</span></li>
+            <li><span>Click <b>Load unpacked</b> and pick the unzipped folder.</span></li>
+            <li><span>Open a playlist on YouTube Music and click the Setflow icon.</span></li>
+          </ol>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="wrap foot-in">
+        <span>Setflow · MIT licence · by <a href="https://kasvith.me" rel="noopener">Kasun Vithanage</a></span>
+        <span><a href={REPO} rel="noopener">GitHub</a> · <a href={`${REPO}/releases`} rel="noopener">Releases</a> · <a href={`${REPO}/issues`} rel="noopener">Issues</a> · <a href="/privacy">Privacy</a></span>
+      </div>
+    </footer>
+  </body>
+</html>
+
+<style>
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    backdrop-filter: blur(14px);
+    background: rgba(18, 19, 32, 0.7);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav-in {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: 60px;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    font-size: 17px;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+  }
+  .links {
+    display: flex;
+    gap: 22px;
+    font-size: 14px;
+  }
+  .links a {
+    color: var(--muted);
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+  .links a:hover {
+    color: var(--ink);
+  }
+  @media (max-width: 560px) {
+    .links a:not(:last-child) {
+      display: none;
+    }
+  }
+
+  .hero {
+    position: relative;
+    padding: 84px 0 40px;
+    overflow: clip;
+  }
+  .glows {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+  }
+  .glow {
+    position: absolute;
+    width: 560px;
+    height: 560px;
+    border-radius: 50%;
+    filter: blur(90px);
+    opacity: 0.55;
+    animation: drift 26s ease-in-out infinite alternate;
+  }
+  .glow.a { background: #e91e63; top: -180px; left: 8%; }
+  .glow.b { background: #9c27b0; top: 40px; right: 4%; animation-delay: -9s; }
+  .glow.c { background: #ffb74d; top: 380px; left: 42%; width: 380px; height: 380px; opacity: 0.22; animation-delay: -17s; }
+  @keyframes drift {
+    from { transform: translate(-40px, 0) scale(1); }
+    to { transform: translate(60px, 50px) scale(1.15); }
+  }
+
+  .hero-in {
+    text-align: center;
+    max-width: 780px;
+  }
+  .eyebrow {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+  h1 {
+    font-size: clamp(2.6rem, 7vw, 5rem);
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    background: linear-gradient(120deg, #fff 0%, #eceaf4 35%, #ffb7cc 55%, #d1a4ff 75%, #fff 100%);
+    background-size: 220% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: shimmer 14s ease-in-out infinite alternate;
+  }
+  @keyframes shimmer {
+    from { background-position: 0% 50%; }
+    to { background-position: 100% 50%; }
+  }
+
+  /* A miniature plan under the headline; the phases breathe in turn, no playhead */
+  .hero-strip {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    width: min(320px, 70%);
+    height: 6px;
+    margin: 28px auto 8px;
+  }
+  .hero-strip > span {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    opacity: 0.6;
+    animation: breathe 4.8s ease-in-out infinite;
+  }
+  .hero-strip > span:nth-child(2) { animation-delay: 1.2s; }
+  .hero-strip > span:nth-child(3) { animation-delay: 2.4s; }
+  .hero-strip > span:nth-child(4) { animation-delay: 3.6s; }
+  @keyframes breathe {
+    0%, 45%, 100% { opacity: 0.6; transform: scaleY(1); box-shadow: none; }
+    20% { opacity: 1; transform: scaleY(1.7); box-shadow: 0 0 14px 1px currentColor; }
+  }
+  .hero-strip .tick {
+    position: absolute;
+    top: 12px;
+    transform: translateX(-50%);
+    font: 400 12px/1 var(--font);
+    color: var(--muted);
+    animation: twinkle 4.8s ease-in-out infinite;
+  }
+  .hero-strip .tick:last-child { animation-delay: 3.6s; }
+  @keyframes twinkle {
+    0%, 45%, 100% { color: var(--muted); }
+    20% { color: var(--ink); }
+  }
+  .lede {
+    margin: 22px auto 0;
+    max-width: 620px;
+    font-size: clamp(1.05rem, 2vw, 1.25rem);
+    color: var(--muted);
+  }
+  .cta {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 30px;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-weight: 600;
+    text-decoration: none;
+    transition: transform 0.15s, background 0.15s;
+  }
+  .btn:hover {
+    transform: translateY(-1px);
+  }
+  .btn.primary {
+    background: var(--ink);
+    color: var(--ground);
+  }
+  .btn.primary:hover {
+    background: #fff;
+  }
+  .btn.ghost {
+    background: var(--sheet);
+    border: 1px solid var(--line);
+  }
+  .btn.ghost:hover {
+    background: var(--sheet-2);
+  }
+  .btn.small {
+    padding: 8px 14px;
+    font-size: 13px;
+    border-radius: 8px;
+  }
+  .dim {
+    opacity: 0.55;
+    font-weight: 500;
+  }
+  .fine {
+    margin-top: 14px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .demo-wrap {
+    margin-top: 56px;
+  }
+  .caption {
+    margin: 18px auto 0;
+    max-width: 640px;
+    text-align: center;
+    font-size: 14px;
+    color: var(--muted);
+  }
+
+  .section {
+    padding: 96px 0 0;
+  }
+  .section h2 {
+    font-size: clamp(1.8rem, 4vw, 2.6rem);
+    max-width: 640px;
+    margin-bottom: 36px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 560px) {
+    .grid { grid-template-columns: 1fr; }
+  }
+  .card {
+    position: relative;
+    padding: 24px 22px 22px;
+    background: var(--sheet);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: transform 0.2s, border-color 0.2s;
+  }
+  .card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(255, 255, 255, 0.16);
+  }
+  .card::after {
+    content: '';
+    position: absolute;
+    inset: auto -40px -60px auto;
+    width: 160px;
+    height: 160px;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: 0.08;
+    filter: blur(30px);
+  }
+  .swatch {
+    display: block;
+    width: 28px;
+    height: 10px;
+    border-radius: 5px;
+    background: var(--accent);
+    margin-bottom: 18px;
+  }
+  .card h3 {
+    font-size: 1.05rem;
+    margin-bottom: 8px;
+  }
+  .card p {
+    color: var(--muted);
+    font-size: 14.5px;
+  }
+  .note {
+    margin-top: 22px;
+    font-size: 14px;
+    color: var(--muted);
+  }
+
+  .steps {
+    list-style: none;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  @media (max-width: 760px) {
+    .steps { grid-template-columns: 1fr; }
+  }
+  .step {
+    padding: 24px 22px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+  .num {
+    display: inline-grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--brand);
+    color: #fff;
+    font-weight: 700;
+    font-size: 14px;
+    margin-bottom: 16px;
+  }
+  .step h3 {
+    font-size: 1.05rem;
+    margin-bottom: 8px;
+  }
+  .step p {
+    color: var(--muted);
+    font-size: 14.5px;
+  }
+
+  .release {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--sheet);
+  }
+  .release.latest {
+    position: relative;
+    padding: 24px;
+    background: linear-gradient(var(--sheet), var(--sheet)) padding-box, linear-gradient(135deg, rgba(233, 30, 99, 0.7), rgba(156, 39, 176, 0.7), rgba(66, 165, 245, 0.4)) border-box;
+    border: 1px solid transparent;
+  }
+  .release header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  .release-links {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .tag {
+    font-weight: 700;
+    font-size: 1.2rem;
+    letter-spacing: -0.01em;
+  }
+  .date {
+    margin-left: 10px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .pill {
+    margin-left: 10px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--brand);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    vertical-align: 2px;
+  }
+  .notes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 18px 28px;
+  }
+  .notes-group h4 {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+  .notes ul {
+    padding-left: 18px;
+    font-size: 14.5px;
+  }
+  .notes li {
+    margin-bottom: 5px;
+  }
+  .notes li::marker {
+    color: var(--muted);
+  }
+  .older {
+    display: grid;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  details.release summary {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 16px 20px;
+    cursor: pointer;
+    list-style: none;
+  }
+  details.release summary::-webkit-details-marker {
+    display: none;
+  }
+  details.release summary .tag {
+    font-size: 1rem;
+  }
+  .summary-hint {
+    margin-left: auto;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  details.release summary::after {
+    content: '';
+    width: 8px;
+    height: 8px;
+    margin-left: 14px;
+    border-right: 2px solid var(--muted);
+    border-bottom: 2px solid var(--muted);
+    transform: rotate(45deg);
+    transition: transform 0.2s;
+  }
+  details[open].release summary::after {
+    transform: rotate(-135deg);
+  }
+  details.release .notes {
+    padding: 0 20px 20px;
+  }
+  .release-foot {
+    grid-column: 1 / -1;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .about {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 32px;
+    align-items: center;
+    padding: 28px;
+    background: var(--sheet);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+  @media (max-width: 640px) {
+    .about { grid-template-columns: 1fr; }
+  }
+  .avatar {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    padding: 4px;
+    background: var(--brand);
+  }
+  .about h2 {
+    margin-bottom: 10px;
+  }
+  .about-line {
+    font-size: 1.05rem;
+    margin-bottom: 8px;
+  }
+  .about .muted a {
+    color: var(--ink);
+  }
+  .about-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 18px;
+  }
+
+  .install {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 40px;
+    align-items: center;
+    padding-bottom: 96px;
+  }
+  @media (max-width: 800px) {
+    .install { grid-template-columns: 1fr; }
+  }
+  .install h2 {
+    margin-bottom: 12px;
+  }
+  .install-steps {
+    padding-left: 0;
+    list-style: none;
+    counter-reset: n;
+    display: grid;
+    gap: 10px;
+  }
+  .install-steps li {
+    counter-increment: n;
+    display: flex;
+    gap: 14px;
+    padding: 14px 16px;
+    background: var(--sheet);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    font-size: 15px;
+  }
+  .install-steps li::before {
+    content: counter(n);
+    flex: none;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--sheet-2);
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.9em;
+    padding: 1px 6px;
+    border-radius: 5px;
+    background: var(--sheet-2);
+  }
+
+  .foot {
+    border-top: 1px solid var(--line);
+    padding: 28px 0 40px;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .foot-in {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .foot a {
+    color: var(--muted);
+  }
+  .foot a:hover {
+    color: var(--ink);
+  }
+</style>
