@@ -16,13 +16,17 @@ Release notes are fetched from the GitHub Releases API at build time and fall ba
 curl -s "https://api.github.com/repos/kasvith/setflow/releases?per_page=30" > src/data/releases.json
 ```
 
-## Cloudflare Pages
+## Deploy
 
-| Setting          | Value        |
-| ---------------- | ------------ |
-| Root directory   | `site`       |
-| Build command    | `pnpm build` |
-| Output directory | `dist`       |
+The site runs as a Cloudflare Worker serving static assets, configured in `wrangler.json`
+(assets from `dist/`, build command, and the `setflow.kasvith.me` custom domain).
 
-Node 24 is pinned in `.node-version`; set `NODE_VERSION=24` in the project's environment variables
-if Pages does not pick it up.
+From a machine that has run `wrangler login`:
+
+```bash
+pnpm deploy    # builds, then uploads dist/ and binds the domain
+```
+
+Or connect the repo under Workers & Pages in the Cloudflare dashboard with root directory `site`,
+build command `pnpm build`, and deploy command `pnpm exec wrangler deploy`. Node 24 is pinned in
+`.node-version`.

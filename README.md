@@ -2,6 +2,10 @@
 
 A Chrome extension for YouTube Music that helps you visualize and track journey phases on playlists. Perfect for planning long listening sessions with distinct phases, sunrise/sunset markers, and time simulation.
 
+[![Setflow: the popup with a plan on the left, the marked-up playlist on the right](docs/screenshot.png)](https://setflow.kasvith.me)
+
+Site and live demo: [setflow.kasvith.me](https://setflow.kasvith.me)
+
 ## Features
 
 - **Phase Tracking**: Define custom phases with names, durations, and colors

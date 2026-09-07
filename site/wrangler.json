@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "setflow-site",
+  "compatibility_date": "2026-09-08",
+  "assets": {
+    "directory": "./dist",
+    "html_handling": "auto-trailing-slash"
+  },
+  "build": {
+    "command": "pnpm build"
+  },
+  "routes": [
+    { "pattern": "setflow.kasvith.me", "custom_domain": true }
+  ]
+}
