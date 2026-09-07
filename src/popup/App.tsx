@@ -90,8 +90,11 @@ export default function App() {
 
   const tabId = useRef<number | undefined>(undefined)
   const isInitialLoad = useRef(true)
+  // Mirror for the message listener, which is registered once
   const sessionRef = useRef<Session | null>(null)
-  sessionRef.current = activeSession
+  useEffect(() => {
+    sessionRef.current = activeSession
+  }, [activeSession])
 
   // Form for a playlist: its saved journey, else this playlist's draft, else defaults
   const loadForm = useCallback(async (info: PageInfo) => {
