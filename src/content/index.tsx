@@ -1,11 +1,15 @@
 import { getActiveSession, onStorageChange } from '../shared/storage'
 import { Session, Phase, ExportedTrack } from '../shared/types'
-import { getPhaseAtTime, getPhasesInRange } from '../shared/utils'
+import { formatDurationCompact, getPhaseAtTime, getPhasesInRange } from '../shared/utils'
 
 let session: Session | null = null
 let popover: HTMLElement | null = null
 let debounceTimeout: number | null = null
 let hoverFrame = 0
+// Tracks in playlist order with their minute offsets, for the plan header's scrub
+let playlistTracks: { el: HTMLElement; start: number; end: number; name: string; artist: string }[] = []
+let planCursor: HTMLElement | null = null
+let scrubRow: HTMLElement | null = null
 // Per-row hover data; dies with the row instead of round-tripping through JSON attributes
 let trackInfos = new WeakMap<Element, TrackInfo>()
 
@@ -407,6 +411,10 @@ function stopObserver() {
 
 function removeLabels() {
   trackInfos = new WeakMap()
+  playlistTracks = []
+  planCursor = null
+  scrubRow?.classList.remove('setflow-scrub-row')
+  scrubRow = null
   // Single consolidated query for all setflow elements
   document.querySelectorAll(
     '.setflow-celestial-label, .setflow-celestial-left-indicator, .setflow-phase-header, .setflow-popover, [data-setflow-phase], .setflow-beyond-phase'
@@ -463,6 +471,7 @@ function labelTracks() {
 
   // Start from beginning of playlist (0 minutes)
   let accumulatedTime = 0
+  playlistTracks = []
 
   trackItems.forEach((item) => {
     // Get track duration from fixed-columns > yt-formatted-string
@@ -498,6 +507,14 @@ function labelTracks() {
     const htmlItem = item as HTMLElement
 
     trackInfos.set(item, { trackStart, trackEnd, trackDuration, sunriseMinutes, sunsetMinutes })
+    playlistTracks.push({
+      el: htmlItem,
+      start: trackStart,
+      end: trackEnd,
+      name: item.querySelector('yt-formatted-string.title')?.textContent?.trim() || 'Unknown track',
+      artist:
+        item.querySelector('.secondary-flex-columns yt-formatted-string')?.textContent?.trim() || '',
+    })
 
     // Add popover event listeners (only once per row; the row's info is looked up live)
     if (!htmlItem.hasAttribute('data-setflow-bound')) {
@@ -545,8 +562,8 @@ function labelTracks() {
     accumulatedTime += trackDuration
   })
 
-  // Also add a header showing current phase if we're in an active session
-  addPhaseHeader()
+  // Plan summary above the tracklist
+  addPhaseHeader(accumulatedTime)
 
   // Drop the mutation records this pass produced so the observer doesn't re-trigger itself
   observer?.takeRecords()
@@ -603,8 +620,17 @@ function removeCelestialLabel(item: Element) {
   }
 }
 
-// A static summary of the plan above the tracklist: name, phase strip, start to end
-function addPhaseHeader() {
+const el = (className: string, text?: string) => {
+  const node = document.createElement('div')
+  node.className = className
+  if (text !== undefined) node.textContent = text
+  return node
+}
+
+// The plan above the tracklist: name, range and music coverage, the phase strip with sunrise
+// and sunset ticks, a legend under each phase, and a hatch over the part of the plan the
+// playlist doesn't reach. Hovering the strip scrubs through the plan.
+function addPhaseHeader(playlistMinutes: number) {
   if (!session) return
 
   const headerArea = document.querySelector(
@@ -619,32 +645,149 @@ function addPhaseHeader() {
     headerArea.insertBefore(header, headerArea.firstChild)
   }
 
-  // Only rebuild when the plan changed; every rebuild is a DOM mutation the observer sees
-  const key = JSON.stringify([session.startTime, session.journeyName, session.phases])
+  // Only rebuild when the plan or the playlist changed; every rebuild is a DOM mutation
+  const key = JSON.stringify([session.startTime, session.journeyName, session.phases, Math.round(playlistMinutes)])
   if (header.dataset.key === key) return
   header.dataset.key = key
   header.replaceChildren()
 
-  const title = document.createElement('div')
-  title.className = 'setflow-plan-title'
-  title.textContent = session.journeyName || 'Setflow plan'
+  const plan = session
+  const total = plan.phases.reduce((sum, p) => sum + p.duration, 0)
+  const end = plan.startTime + total * 60 * 1000
+  const pct = (minutes: number) => `${Math.min(100, Math.max(0, (minutes / total) * 100))}%`
 
-  const strip = document.createElement('div')
-  strip.className = 'setflow-plan-strip'
-  for (const phase of session.phases) {
+  const head = el('setflow-plan-head')
+  head.append(el('setflow-plan-title', plan.journeyName || 'Setflow plan'))
+  const meta = el('setflow-plan-meta')
+  meta.append(el('', `${formatTime(plan.startTime)} to ${formatTime(end)}`))
+  if (playlistMinutes > 0) {
+    const music = formatDurationCompact(Math.round(playlistMinutes))
+    const coverage =
+      playlistMinutes < total
+        ? `${music} of music, ends ${formatTime(plan.startTime + playlistMinutes * 60 * 1000)}`
+        : playlistMinutes > total + 1
+          ? `${music} of music, ${formatDurationCompact(Math.round(playlistMinutes - total))} past the plan`
+          : `${music} of music, covers the plan`
+    meta.append(el('setflow-plan-muted', coverage))
+  }
+  head.append(meta)
+
+  const track = el('setflow-plan-track')
+  const strip = el('setflow-plan-strip')
+  for (const phase of plan.phases) {
     const seg = document.createElement('span')
     seg.style.flex = String(phase.duration)
     seg.style.background = phase.color
-    seg.title = phase.name
     strip.appendChild(seg)
   }
+  if (playlistMinutes > 0 && playlistMinutes < total) {
+    const silent = el('setflow-plan-nomusic')
+    silent.style.left = pct(playlistMinutes)
+    silent.title = 'No music left in the playlist from here'
+    strip.appendChild(silent)
+  }
+  planCursor = el('setflow-plan-cursor')
+  strip.appendChild(planCursor)
+  track.appendChild(strip)
 
-  const totalMinutes = session.phases.reduce((sum, p) => sum + p.duration, 0)
-  const times = document.createElement('div')
-  times.className = 'setflow-plan-times'
-  times.textContent = `${formatTime(session.startTime)} to ${formatTime(session.startTime + totalMinutes * 60 * 1000)}`
+  const ticks: [number | undefined, string, string][] = [
+    [plan.sunriseTimestamp, '☀️', 'Sunrise'],
+    [plan.sunsetTimestamp, '🌙', 'Sunset'],
+  ]
+  for (const [ts, icon, label] of ticks) {
+    if (ts === undefined || ts < plan.startTime || ts >= end) continue
+    const tick = el('setflow-plan-tick', icon)
+    tick.style.left = pct((ts - plan.startTime) / 60000)
+    tick.title = `${label} ${formatTime(ts)}`
+    track.appendChild(tick)
+  }
 
-  header.append(title, strip, times)
+  track.addEventListener('mousemove', (e) => {
+    cancelAnimationFrame(hoverFrame)
+    hoverFrame = requestAnimationFrame(() => scrubPlan(e.clientX, strip))
+  })
+  track.addEventListener('mouseleave', () => {
+    hidePopover()
+    if (planCursor) planCursor.style.display = 'none'
+    scrubRow?.classList.remove('setflow-scrub-row')
+    scrubRow = null
+  })
+
+  const legend = el('setflow-plan-legend')
+  let offset = 0
+  for (const phase of plan.phases) {
+    const cell = el('setflow-plan-cell')
+    cell.style.left = pct(offset)
+    cell.style.width = pct(phase.duration)
+    const name = document.createElement('b')
+    name.textContent = phase.name
+    cell.append(name, ` ${formatTime(plan.startTime + offset * 60 * 1000)}`)
+    legend.appendChild(cell)
+    offset += phase.duration
+  }
+
+  header.append(head, track, legend)
+}
+
+// Pointer over the strip: cursor line, the time and phase there, and the track playing then
+function scrubPlan(clientX: number, strip: HTMLElement) {
+  if (!session || !planCursor) return
+  const rect = strip.getBoundingClientRect()
+  const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+  const total = session.phases.reduce((sum, p) => sum + p.duration, 0)
+  const minutes = ratio * total
+  const timestamp = session.startTime + minutes * 60 * 1000
+
+  planCursor.style.display = 'block'
+  planCursor.style.left = `${ratio * 100}%`
+
+  const phase = getPhaseAtTime(session, minutes)
+  const index = playlistTracks.findIndex((t) => minutes >= t.start && minutes < t.end)
+  const track = index >= 0 ? playlistTracks[index] : null
+  if (scrubRow !== track?.el) {
+    scrubRow?.classList.remove('setflow-scrub-row')
+    scrubRow = track?.el ?? null
+    scrubRow?.classList.add('setflow-scrub-row')
+  }
+
+  if (!popover) popover = createPopover()
+  popover.replaceChildren()
+  const content = el('popover-content')
+  content.append(el('popover-time', formatTime(timestamp)))
+  if (phase) {
+    const row = el('popover-phase')
+    const dot = document.createElement('span')
+    dot.className = 'phase-dot'
+    dot.style.background = phase.color
+    const name = document.createElement('span')
+    name.className = 'phase-name'
+    name.textContent = phase.name
+    const range = document.createElement('span')
+    range.className = 'phase-range'
+    const r = getPhaseTimeRange(session, phase)
+    range.textContent = `${r.start} – ${r.end}`
+    row.append(dot, name, range)
+    content.append(row)
+  }
+  if (track) {
+    content.append(el('popover-track', track.artist ? `${track.name}, ${track.artist}` : track.name))
+    content.append(el('popover-track-position', `Track ${index + 1} of ${playlistTracks.length}`))
+  } else {
+    const last = playlistTracks[playlistTracks.length - 1]
+    content.append(
+      el('popover-track-position', last ? `No music left, playlist ends ${formatTime(session.startTime + last.end * 60 * 1000)}` : 'No tracks loaded yet')
+    )
+  }
+  popover.replaceChildren(content)
+
+  // Centred on the pointer, above the header; below it when the header sits at the top
+  popover.style.display = 'block'
+  const width = popover.offsetWidth
+  const box = strip.closest('.setflow-phase-header')?.getBoundingClientRect() ?? rect
+  const left = Math.max(10, Math.min(window.innerWidth - width - 10, clientX - width / 2))
+  popover.style.left = `${left}px`
+  const above = box.top - popover.offsetHeight - 8
+  popover.style.top = `${above >= 10 ? above : box.bottom + 8}px`
 }
 
 // Add CSS for phase indicators and celestial labels
@@ -655,35 +798,136 @@ style.id = 'setflow-styles'
 style.textContent = `
   .setflow-phase-header {
     margin: 8px 0 16px;
-    padding: 12px 16px;
+    padding: 14px 16px 10px;
     background: rgba(255, 255, 255, 0.04);
     border-radius: 8px;
     font-family: 'YouTube Sans', sans-serif;
+    color: #fff;
+  }
+
+  .setflow-plan-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 16px;
+    margin-bottom: 14px;
   }
 
   .setflow-plan-title {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 500;
-    color: #fff;
-    margin-bottom: 8px;
+  }
+
+  .setflow-plan-meta {
+    text-align: right;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .setflow-plan-muted {
+    color: #aaa;
+    font-size: 12px;
+  }
+
+  .setflow-plan-track {
+    position: relative;
+    padding: 6px 0;
+    cursor: crosshair;
   }
 
   .setflow-plan-strip {
+    position: relative;
     display: flex;
     gap: 1px;
-    height: 6px;
-    border-radius: 3px;
+    height: 8px;
+    border-radius: 4px;
     overflow: hidden;
+    transition: height 0.12s ease;
   }
 
-  .setflow-plan-strip span {
+  .setflow-plan-track:hover .setflow-plan-strip {
+    height: 12px;
+    border-radius: 6px;
+  }
+
+  .setflow-plan-strip > span {
     display: block;
+    min-width: 2px;
   }
 
-  .setflow-plan-times {
+  .setflow-plan-nomusic {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    background: repeating-linear-gradient(
+      -45deg,
+      rgba(0, 0, 0, 0.55),
+      rgba(0, 0, 0, 0.55) 3px,
+      rgba(0, 0, 0, 0.25) 3px,
+      rgba(0, 0, 0, 0.25) 6px
+    );
+  }
+
+  .setflow-plan-cursor {
+    display: none;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #fff;
+    transform: translateX(-1px);
+    pointer-events: none;
+  }
+
+  .setflow-plan-tick {
+    position: absolute;
+    top: -12px;
+    transform: translateX(-50%);
+    font-size: 11px;
+    line-height: 1;
+    pointer-events: none;
+  }
+
+  .setflow-plan-legend {
+    position: relative;
+    height: 18px;
+    margin-top: 4px;
     font-size: 12px;
     color: #aaa;
-    margin-top: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .setflow-plan-cell {
+    position: absolute;
+    top: 0;
+    padding-right: 8px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .setflow-plan-cell b {
+    font-weight: 500;
+    color: #fff;
+  }
+
+  .setflow-scrub-row {
+    outline: 1px solid rgba(255, 255, 255, 0.35);
+    outline-offset: -1px;
+  }
+
+  .popover-track {
+    font-size: 13px;
+    color: #fff;
+    margin-bottom: 4px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .setflow-plan-strip {
+      transition: none;
+    }
   }
 
   [data-setflow-phase] {
@@ -937,7 +1181,7 @@ style.textContent = `
   .popover-track-position {
     font-size: 13px;
     font-weight: 500;
-    color: #9C27B0;
+    color: #aaa;
     margin-bottom: 8px;
     font-variant-numeric: tabular-nums;
   }
