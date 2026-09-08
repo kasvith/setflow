@@ -1,0 +1,12 @@
+---
+// Chrome's mark, drawn as three sectors round the blue centre
+interface Props { size?: number; class?: string }
+const { size = 18, class: cls } = Astro.props
+---
+<svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" class={cls}>
+  <path fill="#DB4437" d="M12 12 L2.47 6.5 A11 11 0 0 1 21.53 6.5 Z" />
+  <path fill="#0F9D58" d="M12 12 L12 23 A11 11 0 0 1 2.47 6.5 Z" />
+  <path fill="#F4B400" d="M12 12 L21.53 6.5 A11 11 0 0 1 12 23 Z" />
+  <circle cx="12" cy="12" r="5.2" fill="#fff" />
+  <circle cx="12" cy="12" r="4" fill="#4285F4" />
+</svg>

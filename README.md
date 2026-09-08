@@ -2,6 +2,11 @@
 
 A Chrome extension for YouTube Music that helps you visualize and track journey phases on playlists. Perfect for planning long listening sessions with distinct phases, sunrise/sunset markers, and time simulation.
 
+[![Available in the Chrome Web Store](docs/cws-badge.png)](https://chromewebstore.google.com/detail/setflow/fmfegpgkfagkbdaphhncebipgphjdejc)
+
+[![Chrome Web Store version](https://img.shields.io/chrome-web-store/v/fmfegpgkfagkbdaphhncebipgphjdejc?label=version)](https://chromewebstore.google.com/detail/setflow/fmfegpgkfagkbdaphhncebipgphjdejc)
+[![Chrome Web Store users](https://img.shields.io/chrome-web-store/users/fmfegpgkfagkbdaphhncebipgphjdejc)](https://chromewebstore.google.com/detail/setflow/fmfegpgkfagkbdaphhncebipgphjdejc)
+
 [![Setflow: the popup with a plan on the left, the marked-up playlist on the right](docs/screenshot.png)](https://setflow.kasvith.me)
 
 Site and live demo: [setflow.kasvith.me](https://setflow.kasvith.me)
@@ -16,7 +21,11 @@ Site and live demo: [setflow.kasvith.me](https://setflow.kasvith.me)
 
 ## Installation
 
-### From GitHub Releases (Recommended)
+### From the Chrome Web Store (Recommended)
+
+[Add Setflow to Chrome](https://chromewebstore.google.com/detail/setflow/fmfegpgkfagkbdaphhncebipgphjdejc). Updates arrive on their own.
+
+### From GitHub Releases
 
 1. Go to the [Releases](../../releases) page
 2. Download the latest `setflow-extension.zip`
