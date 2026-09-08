@@ -4,6 +4,7 @@ import { formatDate, formatSize, getReleases, inline } from '../data/releases'
 import '../styles/global.css'
 
 const REPO = 'https://github.com/kasvith/setflow'
+const STORE = 'https://chromewebstore.google.com/detail/setflow/fmfegpgkfagkbdaphhncebipgphjdejc'
 const releases = await getReleases()
 const [latest, ...older] = releases
 
@@ -78,6 +79,7 @@ const steps = [
           <a href="#releases">Releases</a>
           <a href="#about">About</a>
           <a href={REPO} rel="noopener">GitHub</a>
+          <a class="nav-cta" href={STORE} rel="noopener">Add to Chrome</a>
         </nav>
       </div>
     </header>
@@ -101,10 +103,12 @@ const steps = [
             sunrise and sunset markers, and the clock time every track will play.
           </p>
           <div class="cta rise" style="--d: 0.24s">
-            <a class="btn primary" href={`${REPO}/releases/latest/download/setflow-extension.zip`}>Download latest <span class="dim">· zip</span></a>
+            <a class="btn primary" href={STORE} rel="noopener">Add to Chrome <span class="dim">· free</span></a>
             <a class="btn ghost" href={REPO} rel="noopener">View on GitHub</a>
           </div>
-          <p class="fine rise" style="--d: 0.3s">Free and open source, MIT. Everything stays in your browser.</p>
+          <p class="fine rise" style="--d: 0.3s">
+            Open source, MIT. Everything stays in your browser. Prefer a zip? <a href={`${REPO}/releases/latest/download/setflow-extension.zip`}>Download the latest release</a>.
+          </p>
         </div>
         <div class="wrap demo-wrap rise" style="--d: 0.4s">
           <Demo />
@@ -227,15 +231,19 @@ const steps = [
         <div class="wrap install">
           <div class="reveal">
             <p class="eyebrow">Install</p>
-            <h2>Not on the Web Store yet, so it loads unpacked.</h2>
-            <p class="muted">Takes about a minute. Updates are a new zip over the same folder.</p>
+            <h2>One click from the Chrome Web Store.</h2>
+            <p class="muted">Updates arrive on their own. Then open a playlist on YouTube Music and click the Setflow icon.</p>
+            <a class="badge" href={STORE} rel="noopener"><img src="/cws-badge.png" width="206" height="58" alt="Available in the Chrome Web Store" /></a>
           </div>
-          <ol class="install-steps reveal">
-            <li><span>Download <b>setflow-extension.zip</b> from the latest release and unzip it.</span></li>
-            <li><span>Open <code>chrome://extensions</code> and switch on <b>Developer mode</b>, top right.</span></li>
-            <li><span>Click <b>Load unpacked</b> and pick the unzipped folder.</span></li>
-            <li><span>Open a playlist on YouTube Music and click the Setflow icon.</span></li>
-          </ol>
+          <details class="unpacked reveal">
+            <summary>Prefer to load it yourself?</summary>
+            <ol class="install-steps">
+              <li><span>Download <b>setflow-extension.zip</b> from the <a href={`${REPO}/releases/latest`} rel="noopener">latest release</a> and unzip it.</span></li>
+              <li><span>Open <code>chrome://extensions</code> and switch on <b>Developer mode</b>, top right.</span></li>
+              <li><span>Click <b>Load unpacked</b> and pick the unzipped folder.</span></li>
+              <li><span>Updates are a new zip over the same folder.</span></li>
+            </ol>
+          </details>
         </div>
       </section>
     </main>
@@ -243,7 +251,7 @@ const steps = [
     <footer class="foot">
       <div class="wrap foot-in">
         <span>Setflow · MIT licence · by <a href="https://kasvith.me" rel="noopener">Kasun Vithanage</a></span>
-        <span><a href={REPO} rel="noopener">GitHub</a> · <a href={`${REPO}/releases`} rel="noopener">Releases</a> · <a href={`${REPO}/issues`} rel="noopener">Issues</a> · <a href="/privacy">Privacy</a></span>
+        <span><a href={STORE} rel="noopener">Chrome Web Store</a> · <a href={REPO} rel="noopener">GitHub</a> · <a href={`${REPO}/releases`} rel="noopener">Releases</a> · <a href={`${REPO}/issues`} rel="noopener">Issues</a> · <a href="/privacy">Privacy</a></span>
       </div>
     </footer>
   </body>
@@ -285,6 +293,16 @@ const steps = [
   }
   .links a:hover {
     color: var(--ink);
+  }
+  .links .nav-cta {
+    padding: 7px 12px;
+    border-radius: 8px;
+    background: var(--ink);
+    color: var(--ground);
+    font-weight: 600;
+  }
+  .links .nav-cta:hover {
+    background: #fff;
   }
   @media (max-width: 560px) {
     .links a:not(:last-child) {
@@ -715,6 +733,48 @@ const steps = [
   }
   .install h2 {
     margin-bottom: 12px;
+  }
+  .badge {
+    display: inline-block;
+    margin-top: 22px;
+    border-radius: 8px;
+    transition: transform 0.15s;
+  }
+  .badge:hover {
+    transform: translateY(-1px);
+  }
+  .badge img {
+    display: block;
+    border-radius: 8px;
+  }
+  .fine a {
+    color: var(--muted);
+  }
+  .fine a:hover {
+    color: var(--ink);
+  }
+  .unpacked {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--sheet);
+  }
+  .unpacked summary {
+    padding: 16px 20px;
+    cursor: pointer;
+    font-weight: 600;
+    list-style: none;
+  }
+  .unpacked summary::-webkit-details-marker {
+    display: none;
+  }
+  .unpacked .install-steps {
+    padding: 0 12px 12px;
+  }
+  .unpacked .install-steps li {
+    background: var(--ground);
+  }
+  .install-steps a {
+    color: var(--ink);
   }
   .install-steps {
     padding-left: 0;
