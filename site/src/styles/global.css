@@ -1,3 +1,5 @@
+@import 'tailwindcss';
+
 @font-face {
   font-family: 'Atkinson Hyperlegible Next';
   src: url('/fonts/AtkinsonHyperlegibleNext.woff2') format('woff2');
@@ -5,96 +7,131 @@
   font-display: swap;
 }
 
+@theme {
+  --color-ground: #121320;
+  --color-sheet: #1b1c2c;
+  --color-sheet-2: #24263a;
+  --color-line: rgba(255, 255, 255, 0.08);
+  --color-ink: #eceaf4;
+  --color-muted: #8f8ea4;
+  --color-p1: #ffb74d;
+  --color-p2: #e91e63;
+  --color-p3: #9c27b0;
+  --color-p4: #42a5f5;
+  --font-sans: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
+  --radius-card: 14px;
+  --animate-rise: rise 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-drift: drift 18s ease-in-out infinite alternate;
+  --animate-shimmer: shimmer 14s ease-in-out infinite alternate;
+  --animate-breathe: breathe 4.8s ease-in-out infinite;
+  --animate-twinkle: twinkle 4.8s ease-in-out infinite;
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(18px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes breathe {
+    0%, 45%, 100% {
+      opacity: 0.6;
+      transform: scaleY(1);
+      box-shadow: none;
+    }
+    20% {
+      opacity: 1;
+      transform: scaleY(1.7);
+      box-shadow: 0 0 12px var(--c);
+    }
+  }
+  @keyframes twinkle {
+    0%, 45%, 100% {
+      color: var(--color-muted);
+    }
+    20% {
+      color: var(--color-ink);
+    }
+  }
+  @keyframes shimmer {
+    from {
+      background-position: 0% 50%;
+    }
+    to {
+      background-position: 100% 50%;
+    }
+  }
+  /* The hero orbs: a slow wander plus a breath in size and brightness */
+  @keyframes drift {
+    0% {
+      transform: translate(-40px, 0) scale(0.92);
+      opacity: var(--o, 0.55);
+    }
+    50% {
+      transform: translate(20px, 30px) scale(1.12);
+      opacity: calc(var(--o, 0.55) * 1.35);
+    }
+    100% {
+      transform: translate(70px, 55px) scale(0.96);
+      opacity: var(--o, 0.55);
+    }
+  }
+}
+
+/* The demo mock keeps its own hand-written styles and reads these */
 :root {
-  --ground: #121320;
-  --sheet: #1b1c2c;
-  --sheet-2: #24263a;
-  --line: rgba(255, 255, 255, 0.08);
-  --ink: #eceaf4;
-  --muted: #8f8ea4;
-  --p1: #ffb74d;
-  --p2: #e91e63;
-  --p3: #9c27b0;
-  --p4: #42a5f5;
-  --brand: linear-gradient(135deg, #e91e63, #9c27b0);
-  --font: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
-  --radius: 14px;
+  --ground: var(--color-ground);
+  --sheet: var(--color-sheet);
+  --sheet-2: var(--color-sheet-2);
+  --line: var(--color-line);
+  --ink: var(--color-ink);
+  --muted: var(--color-muted);
+  --font: var(--font-sans);
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
+@layer base {
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+  }
+  body {
+    background: var(--color-ground);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+  :focus-visible {
+    outline: 2px solid var(--color-muted);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
 }
 
-html {
-  color-scheme: dark;
-  scroll-behavior: smooth;
-}
-
-body {
-  background: var(--ground);
-  color: var(--ink);
-  font: 400 16px/1.55 var(--font);
-  -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
-}
-
-a {
-  color: inherit;
-}
-
-button,
-input {
-  font: inherit;
-  color: inherit;
-}
-
-:focus-visible {
-  outline: 2px solid var(--muted);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-
-h1,
-h2,
-h3 {
-  line-height: 1.1;
-  letter-spacing: -0.02em;
-  font-weight: 700;
-}
-
-.wrap {
+@utility wrap {
   width: min(1140px, 100% - 2.5rem);
   margin-inline: auto;
 }
-
-.muted {
-  color: var(--muted);
-}
-
-/* Entrance and scroll-driven reveals; older browsers simply show everything */
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(18px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-.rise {
-  animation: rise 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+/* Entrance stagger for the hero; scroll-driven reveal elsewhere, older browsers show everything */
+@utility rise {
+  animation: var(--animate-rise);
   animation-delay: var(--d, 0s);
 }
-
-@supports (animation-timeline: view()) {
-  .reveal {
+@utility reveal {
+  @supports (animation-timeline: view()) {
     animation: rise linear both;
     animation-timeline: view();
     animation-range: entry 0% entry 35%;
   }
+}
+/* The plan's phase strip, used as the accent edge on the install button */
+@utility phase-strip {
+  background: linear-gradient(90deg, var(--color-p1) 0 19%, var(--color-p2) 19% 57%, var(--color-p3) 57% 84%, var(--color-p4) 84% 100%);
 }
 
 @media (prefers-reduced-motion: reduce) {

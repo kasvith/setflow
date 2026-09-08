@@ -1,6 +1,9 @@
 ---
+import Logo from '../components/Logo.astro'
 import '../styles/global.css'
+import ArrowLeft from '@lucide/astro/icons/arrow-left'
 const REPO = 'https://github.com/kasvith/setflow'
+const h2 = 'mt-8 mb-2 text-[1.15rem] font-bold'
 ---
 
 <html lang="en">
@@ -11,20 +14,20 @@ const REPO = 'https://github.com/kasvith/setflow'
     <meta name="description" content="What Setflow stores and where. Everything stays in your browser." />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
   </head>
-  <body>
-    <main class="wrap page">
-      <p><a href="/">← Setflow</a></p>
-      <h1>Privacy</h1>
-      <p class="muted">Last updated 7 September 2026</p>
+  <body class="bg-ground text-ink">
+    <main class="wrap max-w-[680px] py-12 pb-24">
+      <a href="/" class="inline-flex items-center gap-2 text-muted hover:text-ink"><ArrowLeft size={16} /> <Logo size={18} /> Setflow</a>
+      <h1 class="mt-6 text-[2.4rem] font-bold leading-tight tracking-tight">Privacy</h1>
+      <p class="mt-1 text-muted">Last updated 7 September 2026</p>
 
-      <p class="lead">
+      <p class="mt-5 text-[1.15rem]">
         Setflow does not collect, store or transmit any of your data. There is no server behind it. The only
         place anything is kept is the extension's own storage in your browser, and you can wipe it by
         uninstalling.
       </p>
 
-      <h2>What stays on your device</h2>
-      <p>
+      <h2 class={h2}>What stays on your device</h2>
+      <p class="mb-2.5">
         Setflow keeps the plans you make: phase names, durations and colours, start, sunrise and sunset times,
         journey names, and the URL and title of the YouTube Music playlists you plan on. Presets and unsaved
         drafts are kept the same way.
@@ -34,71 +37,31 @@ const REPO = 'https://github.com/kasvith/setflow'
         no backend, no account, no analytics and no third-party code that runs at all.
       </p>
 
-      <h2>What it reads</h2>
+      <h2 class={h2}>What it reads</h2>
       <p>
-        On <code>music.youtube.com</code> the extension reads the playlist page you have open to find the track
+        On <code class="rounded-md bg-sheet-2 px-1.5 py-px font-mono text-[0.9em]">music.youtube.com</code> the extension reads the playlist page you have open to find the track
         list and each track's length, so it can mark the tracks. It does not read anything on other sites and
         does not read your YouTube account.
       </p>
 
-      <h2>Permissions</h2>
-      <ul>
+      <h2 class={h2}>Permissions</h2>
+      <ul class="list-disc space-y-1.5 pl-5 marker:text-muted">
         <li><b>storage</b> to save your plans on your device.</li>
         <li><b>activeTab</b> and <b>scripting</b> to mark up the playlist page you are on when you open the popup.</li>
         <li><b>music.youtube.com</b> so the marking works on YouTube Music and nowhere else.</li>
       </ul>
 
-      <h2>Export</h2>
+      <h2 class={h2}>Export</h2>
       <p>
         Export JSON writes a file to your computer with the tracks and times of the current plan. It is created
         locally and goes nowhere unless you share it.
       </p>
 
-      <h2>Removing your data</h2>
+      <h2 class={h2}>Removing your data</h2>
       <p>Uninstalling the extension deletes everything it stored. Delete individual journeys and presets in the Library.</p>
 
-      <h2>Questions</h2>
-      <p>Setflow is open source. Read the code or ask on <a href={`${REPO}/issues`} rel="noopener">GitHub</a>.</p>
+      <h2 class={h2}>Questions</h2>
+      <p>Setflow is open source. Read the code or ask on <a class="underline decoration-muted underline-offset-2 hover:decoration-ink" href={`${REPO}/issues`} rel="noopener">GitHub</a>.</p>
     </main>
   </body>
 </html>
-
-<style>
-  .page {
-    max-width: 680px;
-    padding: 48px 0 96px;
-  }
-  h1 {
-    font-size: 2.4rem;
-    margin: 24px 0 6px;
-  }
-  .lead {
-    font-size: 1.15rem;
-    margin: 18px 0 8px;
-  }
-  h2 {
-    font-size: 1.15rem;
-    margin: 32px 0 8px;
-  }
-  p,
-  li {
-    color: var(--ink);
-    margin-bottom: 10px;
-  }
-  ul {
-    padding-left: 20px;
-  }
-  a {
-    color: var(--muted);
-  }
-  a:hover {
-    color: var(--ink);
-  }
-  code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 0.9em;
-    padding: 1px 6px;
-    border-radius: 5px;
-    background: var(--sheet-2);
-  }
-</style>
